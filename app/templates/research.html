@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight">Research</h1>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Grounded only in each company's own annual report and concall transcripts &mdash; no news, no broker notes.</p>
+  </div>
+
+  <form action="/research/lookup" method="get" class="flex gap-2">
+    <input type="text" name="ticker" placeholder="Any NSE ticker (e.g. WIPRO)"
+           class="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm" />
+    <button type="submit" class="px-4 py-2 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-medium">Go</button>
+  </form>
+  {% if error %}
+  <div class="text-sm text-red-600 dark:text-red-400 -mt-2">{{ error }}</div>
+  {% endif %}
+
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Your portfolio</div>
+    <div class="flex flex-wrap gap-2">
+      {% for c in portfolio %}
+      <a href="/research/{{ c.ticker }}" class="px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 text-sm">{{ c.ticker }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2 mt-2">Ad-hoc watchlist</div>
+    <div class="flex flex-wrap gap-2">
+      {% for c in adhoc %}
+      <a href="/research/{{ c.ticker }}" class="px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 text-sm">{{ c.ticker }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

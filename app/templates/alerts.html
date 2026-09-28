@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block header_right %}
+<a href="/alerts?refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
+{% endblock %}
+{% block content %}
+<div class="flex flex-col gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight">Alerts</h1>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Unusual price/volume moves and material announcements across your portfolio.</p>
+  </div>
+
+  <form action="/alerts" method="get" class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex flex-col gap-2">
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Alert thresholds</div>
+    <div class="flex flex-col gap-2 text-sm">
+      <label class="flex items-center gap-1.5 whitespace-nowrap">
+        <span>Volume &gt;</span>
+        <input type="number" step="0.1" min="1" name="vol_mult" value="{{ vol_mult }}"
+               class="w-16 rounded border border-slate-300 dark:border-slate-700 bg-transparent px-1.5 py-0.5" />
+        <span>&times; 20-day avg</span>
+      </label>
+      <label class="flex items-center gap-1.5 whitespace-nowrap">
+        <span>Price move &plusmn;</span>
+        <input type="number" step="0.5" min="0" name="price_pct" value="{{ price_pct }}"
+               class="w-16 rounded border border-slate-300 dark:border-slate-700 bg-transparent px-1.5 py-0.5" />
+        <span>%</span>
+      </label>
+      <button type="submit" class="self-start text-blue-600 dark:text-blue-400 underline">Apply</button>
+    </div>
+  </form>
+
+  {% if not price_volume and not announcements %}
+  <div class="text-sm text-slate-500 dark:text-slate-400 mt-4">No active alerts right now.</div>
+  {% endif %}
+
+  {% if price_volume %}
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Price &amp; volume ({{ price_volume|length }})</div>
+    <div class="flex flex-col gap-2">
+      {% for a in price_volume %}
+      <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+        <div class="flex items-center justify-between">
+          <span class="font-medium text-sm">{{ a.ticker }}</span>
+          <span class="text-sm {{ 'text-green-600' if a.pct_change and a.pct_change > 0 else 'text-red-600' }}">
+            {{ '%+.1f'|format(a.pct_change) }}%
+          </span>
+        </div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          {% for r in a.reasons %}<div>{{ r }}</div>{% endfor %}
+        </div>
+        <div class="text-xs text-slate-400 mt-1">{{ a.date }} &middot; close &#8377;{{ a.close }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if announcements %}
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2 mt-2">Material announcements ({{ announcements|length }})</div>
+    <div class="flex flex-col gap-2">
+      {% for item in announcements %}
+      {% include "partials/announcement_card.html" %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/
+*.db
+.DS_Store
+node_modules/
+uvicorn.log
+AI_Engineer_Build_Challenge.pdf
+AI_Engineer_Build_Challenge_Reference.pdf
+

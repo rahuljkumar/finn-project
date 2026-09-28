@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-4 mt-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Welcome to FINN</h1>
+    <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm">Your portfolio's signal, without the noise.</p>
+  </div>
+
+  <a href="/digest" class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center justify-between shadow-sm">
+    <div>
+      <div class="font-medium">Push: Digest</div>
+      <div class="text-sm text-slate-500 dark:text-slate-400">What changed in your portfolio, last 24h</div>
+    </div>
+    <span class="text-slate-400">&rarr;</span>
+  </a>
+
+  <a href="/alerts" class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center justify-between shadow-sm">
+    <div>
+      <div class="font-medium">Push: Alerts</div>
+      <div class="text-sm text-slate-500 dark:text-slate-400">Material events &amp; unusual price/volume moves</div>
+    </div>
+    <span class="text-slate-400">&rarr;</span>
+  </a>
+
+  <a href="/research" class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center justify-between shadow-sm">
+    <div>
+      <div class="font-medium">Pull: Research</div>
+      <div class="text-sm text-slate-500 dark:text-slate-400">Dig into any NSE-listed company</div>
+    </div>
+    <span class="text-slate-400">&rarr;</span>
+  </a>
+</div>
+{% endblock %}

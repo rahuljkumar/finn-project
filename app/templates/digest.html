@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block header_right %}
+<a href="/digest?hours={{ window_hours }}&refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
+{% endblock %}
+{% block content %}
+<div x-data="{ showRoutine: false }" class="flex flex-col gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight">Digest</h1>
+    <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
+      <div class="flex shrink-0 gap-2">
+        {% for h, label in [(24, '24h'), (168, '7d'), (720, '30d')] %}
+        <a href="/digest?hours={{ h }}"
+           class="px-3 py-1 rounded-full border {{ 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900' if window_hours == h else 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300' }}">
+          {{ label }}
+        </a>
+        {% endfor %}
+      </div>
+      <form action="/digest" method="get" class="flex items-center gap-2">
+        <input id="digest-hours" type="number" name="hours" min="1" max="8760" value="{{ window_hours }}" required
+               class="w-20 rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-sm" />
+        <label for="digest-hours" class="text-slate-500 dark:text-slate-400">hours</label>
+        <button type="submit" class="text-slate-500 dark:text-slate-400 underline">Go</button>
+      </form>
+    </div>
+  </div>
+
+  {% if not high and not medium and not routine %}
+  <div class="text-sm text-slate-500 dark:text-slate-400 mt-4">
+    No filings in this window yet. Try a longer window, or hit Refresh to pull the latest.
+  </div>
+  {% endif %}
+
+  {% if high %}
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-red-600 dark:text-red-400 mb-2">Priority ({{ high|length }})</div>
+    <div class="flex flex-col gap-2">
+      {% for item in high %}
+      {% include "partials/announcement_card.html" %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if medium %}
+  <div>
+    <div class="text-xs font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400 mb-2 mt-2">Notable ({{ medium|length }})</div>
+    <div class="flex flex-col gap-2">
+      {% for item in medium %}
+      {% include "partials/announcement_card.html" %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if routine %}
+  <div class="mt-2">
+    <button @click="showRoutine = !showRoutine" class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showRoutine }">
+        <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+      </svg>
+      <span>{{ routine|length }} routine updates</span>
+    </button>
+    <div x-show="showRoutine" x-cloak class="flex flex-col gap-2 mt-2">
+      {% for item in routine %}
+      {% include "partials/announcement_card.html" %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

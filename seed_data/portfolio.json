@@ -1,0 +1,31 @@
+{
+  "portfolio": [
+    {"ticker": "RELIANCE", "name": "Reliance Industries", "sector": "Energy/Conglomerate", "cap_tier": "large"},
+    {"ticker": "TCS", "name": "Tata Consultancy Services", "sector": "IT Services", "cap_tier": "large"},
+    {"ticker": "HDFCBANK", "name": "HDFC Bank", "sector": "Banking", "cap_tier": "large"},
+    {"ticker": "INFY", "name": "Infosys", "sector": "IT Services", "cap_tier": "large"},
+    {"ticker": "ICICIBANK", "name": "ICICI Bank", "sector": "Banking", "cap_tier": "large"},
+    {"ticker": "HINDUNILVR", "name": "Hindustan Unilever", "sector": "FMCG", "cap_tier": "large"},
+    {"ticker": "ITC", "name": "ITC Limited", "sector": "FMCG/Conglomerate", "cap_tier": "large"},
+    {"ticker": "LT", "name": "Larsen & Toubro", "sector": "Infrastructure/Engineering", "cap_tier": "large"},
+    {"ticker": "BHARTIARTL", "name": "Bharti Airtel", "sector": "Telecom", "cap_tier": "large"},
+    {"ticker": "MARUTI", "name": "Maruti Suzuki", "sector": "Automobile", "cap_tier": "large"},
+    {"ticker": "SUNPHARMA", "name": "Sun Pharmaceutical", "sector": "Pharma", "cap_tier": "large"},
+    {"ticker": "TATASTEEL", "name": "Tata Steel", "sector": "Metals", "cap_tier": "large"},
+    {"ticker": "TITAN", "name": "Titan Company", "sector": "Consumer Durables", "cap_tier": "large"},
+    {"ticker": "ASIANPAINT", "name": "Asian Paints", "sector": "Paints/Consumer", "cap_tier": "large"},
+    {"ticker": "BAJFINANCE", "name": "Bajaj Finance", "sector": "NBFC", "cap_tier": "large"},
+    {"ticker": "PERSISTENT", "name": "Persistent Systems", "sector": "IT Services", "cap_tier": "mid"},
+    {"ticker": "COFORGE", "name": "Coforge", "sector": "IT Services", "cap_tier": "mid"},
+    {"ticker": "ASTRAL", "name": "Astral Limited", "sector": "Building Materials", "cap_tier": "mid"},
+    {"ticker": "PAGEIND", "name": "Page Industries", "sector": "Apparel", "cap_tier": "mid"},
+    {"ticker": "CERA", "name": "Cera Sanitaryware", "sector": "Building Materials", "cap_tier": "small"}
+  ],
+  "adhoc": [
+    {"ticker": "ETERNAL", "name": "Eternal (formerly Zomato)", "sector": "Internet/New-age", "cap_tier": "large"},
+    {"ticker": "IRCTC", "name": "IRCTC", "sector": "PSU/Services", "cap_tier": "mid"},
+    {"ticker": "DIXON", "name": "Dixon Technologies", "sector": "Electronics Manufacturing", "cap_tier": "mid"},
+    {"ticker": "TRENT", "name": "Trent Limited", "sector": "Retail", "cap_tier": "large"},
+    {"ticker": "SUZLON", "name": "Suzlon Energy", "sector": "Renewable Energy", "cap_tier": "small"}
+  ]
+}

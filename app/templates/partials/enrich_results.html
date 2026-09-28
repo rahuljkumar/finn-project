@@ -1,0 +1,30 @@
+<div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-1">
+    {{ data.quarter }} vs {{ data.qoq_quarter }} (QoQ) &middot; vs {{ data.yoy_quarter }} (YoY) &middot; &#8377; Cr
+  </div>
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-slate-400 text-[11px]">
+        <th class="font-normal">Metric</th>
+        <th class="font-normal text-right">Value</th>
+        <th class="font-normal text-right">QoQ</th>
+        <th class="font-normal text-right">YoY</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key, label in [('revenue', 'Revenue'), ('ebitda', 'EBITDA'), ('pbt', 'PBT'), ('pat', 'PAT')] %}
+      {% set m = data.metrics[key] %}
+      <tr class="border-t border-slate-50 dark:border-slate-800/50">
+        <td class="py-1">{{ label }}</td>
+        <td class="text-right">{{ '%.0f'|format(m.value) if m.value is not none else '&mdash;' }}</td>
+        <td class="text-right {{ 'text-green-600' if m.qoq_pct and m.qoq_pct > 0 else 'text-red-600' if m.qoq_pct and m.qoq_pct < 0 else 'text-slate-400' }}">
+          {{ '%+.1f%%'|format(m.qoq_pct) if m.qoq_pct is not none else '&mdash;' }}
+        </td>
+        <td class="text-right {{ 'text-green-600' if m.yoy_pct and m.yoy_pct > 0 else 'text-red-600' if m.yoy_pct and m.yoy_pct < 0 else 'text-slate-400' }}">
+          {{ '%+.1f%%'|format(m.yoy_pct) if m.yoy_pct is not none else '&mdash;' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

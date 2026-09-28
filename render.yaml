@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: finn
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CHEAP_MODEL
+        sync: false
+      - key: REASONING_MODEL
+        sync: false
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: DB_PATH
+        value: /srv/data/finn.db
+      - key: USE_LIVE_NSE
+        value: "true"
+      - key: ALERT_VOLUME_MULTIPLE
+        value: "2.0"
+      - key: ALERT_PRICE_MOVE_PCT
+        value: "5.0"
+      - key: PYTHONUNBUFFERED
+        value: "1"
