@@ -2,6 +2,7 @@
 threshold calculations used by the alerts pipeline."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
@@ -22,13 +23,18 @@ def _yf_symbol(ticker: str, exchange: str = "NSE") -> str:
 def fetch_history(ticker: str, exchange: str = "NSE", period: str = "3mo") -> pd.DataFrame:
     """Fetch EOD OHLCV history and compute rolling volume average + daily % change."""
     symbol = _yf_symbol(ticker, exchange)
-    df = yf.Ticker(symbol).history(period=period, interval="1d")
+    df = yf.Ticker(symbol).history(period=period, interval="1d", timeout=10)
     if df.empty:
         logger.warning("No yfinance data for %s", symbol)
         return df
 
     df = df.reset_index()
-    df["avg_volume_20d"] = df["Volume"].rolling(ROLLING_WINDOW, min_periods=5).mean()
+    now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    # Yahoo can return a partially traded daily candle during market hours.
+    # Keep the fallback consistent with the app's completed-day alerts.
+    if exchange.upper() == "NSE" and now.hour < 17:
+        df = df[df["Date"].dt.date < now.date()].copy()
+    df["avg_volume_20d"] = df["Volume"].rolling(ROLLING_WINDOW, min_periods=ROLLING_WINDOW).mean()
     df["pct_change"] = df["Close"].pct_change() * 100
     return df
 

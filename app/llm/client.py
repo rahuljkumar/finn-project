@@ -24,7 +24,7 @@ _client: OpenAI | None = None
 def get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=OPENAI_API_KEY)
+        _client = OpenAI(api_key=OPENAI_API_KEY, timeout=90.0, max_retries=1)
     return _client
 
 
@@ -77,8 +77,9 @@ def chat_json(prompt: str, tier: str = "reasoning", system: str | None = None) -
         response_format={"type": "json_object"},
     )
     text = resp.choices[0].message.content or "{}"
+    parsed = json.loads(text)
     set_cached(key, text, model)
-    return json.loads(text)
+    return parsed
 
 
 def web_search_answer(prompt: str, tier: str = "reasoning") -> str:

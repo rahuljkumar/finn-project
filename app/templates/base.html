@@ -20,7 +20,8 @@
     <span class="text-xs text-slate-500 dark:text-slate-400">{% block header_right %}{% endblock %}</span>
   </header>
 
-  <main class="flex-1 px-4 py-4 pb-20 max-w-2xl w-full mx-auto">
+  <main class="flex-1 px-4 py-4 pb-20 max-w-2xl w-full mx-auto"
+        {% if feed and feed.running %}hx-get="{{ poll_url }}" hx-trigger="every 5s" hx-select="main" hx-target="this" hx-swap="outerHTML"{% endif %}>
     {% block content %}{% endblock %}
   </main>
 

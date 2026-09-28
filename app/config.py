@@ -14,6 +14,8 @@ REASONING_MODEL = os.getenv("REASONING_MODEL", "gpt-4o")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "data" / "finn.db"))
+DATA_DIR = Path(DB_PATH).expanduser().resolve().parent
+AUTO_REFRESH = os.getenv("AUTO_REFRESH", "true").lower() == "true"
 
 USE_LIVE_NSE = os.getenv("USE_LIVE_NSE", "true").lower() == "true"
 USE_LIVE_BSE = os.getenv("USE_LIVE_BSE", "true").lower() == "true"

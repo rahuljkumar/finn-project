@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.db import get_conn, init_db
 from app.main import app
 from app.pipeline.alerts import get_price_data_status
+from app.feeds import _job
 from app.sources.yfinance_client import detect_anomaly, persist_history
 
 
@@ -27,6 +28,16 @@ class AlertsTests(unittest.TestCase):
         portfolio_patch.start()
         self.addCleanup(portfolio_patch.stop)
         init_db()
+        official_patch = patch("app.pipeline.alerts.fetch_portfolio_history", return_value={})
+        official_patch.start()
+        self.addCleanup(official_patch.stop)
+        def run_refresh(feed, force=False):
+            with get_conn() as conn:
+                conn.execute("INSERT OR IGNORE INTO feed_state (feed) VALUES (?)", (feed,))
+            _job(feed)
+        refresh_patch = patch("app.main.request_refresh", side_effect=run_refresh)
+        refresh_patch.start()
+        self.addCleanup(refresh_patch.stop)
         self.client = TestClient(app)
 
     def add_price(self, ticker, volume=100, average=100, change=0):
@@ -104,10 +115,11 @@ class AlertsTests(unittest.TestCase):
         self.assertEqual(get_price_data_status()["loaded"], 2)
 
     def test_empty_provider_response_is_reported(self):
-        with patch("app.pipeline.alerts.refresh_ticker", return_value=pd.DataFrame()):
+        with patch("app.pipeline.alerts.refresh_ticker", return_value=pd.DataFrame()), \
+             self.assertLogs("app.feeds", level="ERROR"):
             response = self.client.get("/alerts?refresh=true&vol_mult=1&price_pct=0.5")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Updated prices for 0 of 2 stocks", response.text)
+        self.assertIn("Live source unavailable", response.text)
         self.assertIn("No price data loaded yet", response.text)
 
     def test_incomplete_history_is_not_reported_as_no_alerts(self):

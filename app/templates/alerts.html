@@ -28,7 +28,8 @@
     </div>
   </form>
 
-  {% if refresh_summary %}
+  {% include "partials/feed_status.html" %}
+  {% if refresh_summary and not feed.running %}
   <div role="status" class="text-sm text-slate-500 dark:text-slate-400">
     Updated prices for {{ refresh_summary.refreshed }} of {{ refresh_summary.total }} stocks.
     {% if refresh_summary.failed %}
@@ -48,6 +49,8 @@
   {% else %}
   <div class="text-xs text-slate-500 dark:text-slate-400">
     Price data: {{ price_data.available }} of {{ price_data.total }} stocks &middot; Latest trading date: {{ price_data.latest_date }}
+    <div>End-of-day data; prices update after NSE publishes its daily report.</div>
+    {% if price_data.oldest_date and price_data.oldest_date != price_data.latest_date %}<div class="text-amber-600">Some stocks have older prices, from {{ price_data.oldest_date }}. Check the date on each alert.</div>{% endif %}
     {% if price_data.available < price_data.total %}<div>Some stocks have no usable price data and could not be checked.</div>{% endif %}
   </div>
   {% if not price_volume and not announcements %}

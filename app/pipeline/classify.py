@@ -122,7 +122,7 @@ def _classify_ambiguous(desc: str, text: str) -> str:
 
 
 def rule_classify(announcement: dict) -> str | None:
-    desc = (announcement.get("desc") or "").strip()
+    desc = (announcement.get("desc") or "").strip().removesuffix("-XBRL").strip()
     if desc in AMBIGUOUS_DESCS:
         text = f"{desc} {announcement.get('attchmntText', '')}"
         return _classify_ambiguous(desc, text)

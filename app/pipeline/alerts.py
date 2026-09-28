@@ -4,9 +4,11 @@ announcement categories, surfaced separately from the routine digest."""
 import logging
 from datetime import datetime, timedelta, timezone
 
-from app.config import load_portfolio
+from app.config import USE_LIVE_NSE, load_portfolio
 from app.db import get_conn
 from app.sources.yfinance_client import detect_anomaly, refresh_ticker
+from app.sources.yfinance_client import persist_history
+from app.sources.nse_reports import fetch_portfolio_history
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +22,15 @@ def _tickers() -> list[str]:
 
 def refresh_price_history() -> dict:
     tickers = _tickers()
+    official = fetch_portfolio_history(tickers)
     refreshed, failed = [], []
     for ticker in tickers:
         try:
-            history = refresh_ticker(ticker)
+            if ticker in official:
+                history = official[ticker]
+                persist_history(ticker, history)
+            else:
+                history = refresh_ticker(ticker)
             if history.empty:
                 failed.append(ticker)
             else:
@@ -31,7 +38,10 @@ def refresh_price_history() -> dict:
         except Exception as exc:
             logger.warning("Price refresh failed for %s: %s", ticker, exc)
             failed.append(ticker)
-    return {"total": len(tickers), "refreshed": len(refreshed), "failed": failed}
+    if tickers and not refreshed:
+        raise RuntimeError("Both price sources are unavailable. Previously saved prices are retained.")
+    return {"total": len(tickers), "refreshed": len(refreshed), "failed": failed,
+            "official": len(official)}
 
 
 def get_price_data_status() -> dict:
@@ -59,6 +69,7 @@ def get_price_data_status() -> dict:
         "loaded": len(rows),
         "available": available,
         "latest_date": max((r["date"] for r in rows), default=None),
+        "oldest_date": min((r["date"] for r in rows), default=None),
     }
 
 
@@ -75,10 +86,11 @@ def get_category_alerts(window_hours: int = 72) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
     placeholders = ",".join("?" for _ in TRIGGER_CATEGORIES)
     with get_conn() as conn:
+        live_only = " AND source != 'seed'" if USE_LIVE_NSE else ""
         rows = conn.execute(
             f"""
             SELECT * FROM announcements
-            WHERE published_at >= ? AND category IN ({placeholders})
+            WHERE published_at >= ? AND category IN ({placeholders}){live_only}
             ORDER BY published_at DESC
             """,
             (cutoff, *TRIGGER_CATEGORIES),

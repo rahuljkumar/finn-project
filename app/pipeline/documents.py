@@ -10,11 +10,12 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import requests
 
-from app.config import BASE_DIR
+from app.config import DATA_DIR
+from app.storage import atomic_write
 
 logger = logging.getLogger(__name__)
 
-CACHE_DIR = BASE_DIR / "data" / "pdf_cache"
+CACHE_DIR = DATA_DIR / "pdf_cache"
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -43,7 +44,7 @@ def download_pdf(url: str) -> bytes | None:
             logger.warning("Not a PDF response for %s", url)
             return None
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(resp.content)
+        atomic_write(path, resp.content)
         return resp.content
     except requests.RequestException as e:
         logger.warning("PDF download failed for %s: %s", url, e)

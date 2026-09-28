@@ -24,9 +24,17 @@
     </div>
   </div>
 
-  {% if not high and not medium and not routine %}
+  {% include "partials/feed_status.html" %}
+  {% if live_mode and not has_history %}
+  <p class="text-xs text-slate-500 dark:text-slate-400">Recent filings are collected continuously. Historical backfill is pending; longer windows may be incomplete.</p>
+  {% elif not live_mode %}
+  <p class="text-xs text-amber-600">Sample-data mode. These are example filings.</p>
+  {% endif %}
+
+  {% if not high and not medium and not routine and not feed.running %}
   <div class="text-sm text-slate-500 dark:text-slate-400 mt-4">
-    No filings in this window yet. Try a longer window, or hit Refresh to pull the latest.
+    {% if not feed.succeeded_at %}No live filings loaded yet. Tap Refresh to retry the source.
+    {% else %}No saved filings in this window. Try a longer window.{% endif %}
   </div>
   {% endif %}
 

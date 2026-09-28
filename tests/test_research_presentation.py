@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.db import init_db
 from app.pipeline import pull_pipeline as pull
 from app.presentation import render_markdown, source_url
 
@@ -19,6 +20,14 @@ DOCS = {
 
 
 class ResearchPresentationTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        db_patch = patch("app.db.DB_PATH", str(Path(folder.name) / "research.db"))
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
+        init_db()
+
     def test_markdown_formats_headings_lists_and_tables(self):
         result = str(render_markdown(
             "## Overview\n\n**At a glance**\n\n- Revenue grew\n- Margin improved\n\n"

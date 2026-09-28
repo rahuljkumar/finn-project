@@ -1,12 +1,25 @@
 """Safe formatting for generated research and its document links."""
 
 from urllib.parse import urlsplit
+from datetime import datetime, timedelta, timezone
 
 from markdown_it import MarkdownIt
 from markupsafe import Markup
 
 
 _markdown = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable("table")
+
+
+def display_time(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        date = datetime.fromisoformat(value)
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=timezone.utc)
+        return date.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y, %H:%M IST")
+    except ValueError:
+        return value
 
 
 def render_markdown(value: str | None) -> Markup:

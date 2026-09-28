@@ -18,6 +18,8 @@ services:
         value: /srv/data/finn.db
       - key: USE_LIVE_NSE
         value: "true"
+      - key: AUTO_REFRESH
+        value: "true"
       - key: ALERT_VOLUME_MULTIPLE
         value: "2.0"
       - key: ALERT_PRICE_MOVE_PCT

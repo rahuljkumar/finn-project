@@ -1,0 +1,6 @@
+{% if saved_at %}
+<div class="text-xs text-slate-500 dark:text-slate-400 mb-2">
+  Prepared: {{ saved_at|display_time }}
+  {% if stale %}<div class="text-amber-600">Showing the last saved answer. A fresh answer is temporarily unavailable; try again later.</div>{% endif %}
+</div>
+{% endif %}

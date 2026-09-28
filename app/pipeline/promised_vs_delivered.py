@@ -117,7 +117,7 @@ def build_promised_vs_delivered(ticker: str, n_quarters: int = 4) -> list[dict]:
             )
             continue
 
-        guidance_chunks = _retrieve_within(chunks, guidance_concall["label"], GUIDANCE_QUERY)
+        guidance_chunks = _retrieve_within(chunks, f"Concall {guidance_concall['label']}", GUIDANCE_QUERY)
         guidance_text = "\n\n".join(c["text"] for c in guidance_chunks) or "(no relevant excerpt found)"
 
         prompt = VERDICT_PROMPT.format(

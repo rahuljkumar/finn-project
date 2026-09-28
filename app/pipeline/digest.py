@@ -1,13 +1,14 @@
 """Windowed Push digest: fetch -> classify -> prioritize -> persist -> query."""
 
+import hashlib
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from app.config import CATEGORY_PRIORITY, USE_LIVE_NSE, load_portfolio
 from app.db import get_conn
 from app.pipeline.classify import classify_batch
 from app.sources.nse_client import fetch_announcements
+from app.sources.nse_rss import fetch_recent_announcements
 from app.sources.seed_data import load_seed_announcements
 
 logger = logging.getLogger(__name__)
@@ -17,8 +18,8 @@ NSE_DT_FORMAT = "%d-%b-%Y %H:%M:%S"
 
 def _parse_nse_dt(raw: str) -> str | None:
     try:
-        dt = datetime.strptime(raw, NSE_DT_FORMAT).replace(tzinfo=timezone.utc)
-        return dt.isoformat()
+        dt = datetime.strptime(raw, NSE_DT_FORMAT).replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+        return dt.astimezone(timezone.utc).isoformat()
     except (ValueError, TypeError):
         return None
 
@@ -28,15 +29,6 @@ def _company_lookup() -> dict[str, str]:
     return {c["ticker"]: c["name"] for c in data["portfolio"] + data["adhoc"]}
 
 
-def fetch_with_fallback(ticker: str) -> tuple[list[dict], str]:
-    """Try live NSE first, fall back to curated seed data. Returns (items, source)."""
-    if USE_LIVE_NSE:
-        live = fetch_announcements(ticker)
-        if live:
-            return live, "nse_live"
-    return load_seed_announcements(ticker), "seed"
-
-
 def refresh_all(tickers: list[str] | None = None) -> int:
     """Fetch, classify, and persist announcements for the given tickers
     (defaults to the whole portfolio + ad-hoc list). Returns count persisted."""
@@ -44,28 +36,66 @@ def refresh_all(tickers: list[str] | None = None) -> int:
     tickers = tickers or [c["ticker"] for c in portfolio["portfolio"] + portfolio["adhoc"]]
     names = _company_lookup()
 
-    all_items: list[tuple[str, str, dict]] = []  # (ticker, source, raw item)
-    # Modest concurrency (not all 25 at once) -- NSE self-throttles per
-    # session to ~3 req/s and each ticker fetch does its own session
-    # warm-up, so this trades some of that budget for wall-clock time
-    # without blasting the endpoint with 25 simultaneous sessions.
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        fetched = pool.map(fetch_with_fallback, tickers)
-    for ticker, (items, source) in zip(tickers, fetched):
-        for item in items:
-            all_items.append((ticker, source, item))
+    all_items: list[tuple[str, str, dict]] = []
+    completed_backfill = False
+    if USE_LIVE_NSE:
+        companies = [c for c in portfolio["portfolio"] + portfolio["adhoc"] if c["ticker"] in tickers]
+        try:
+            recent = fetch_recent_announcements(companies)
+        except Exception as exc:
+            logger.warning("NSE RSS unavailable: %s", exc)
+            recent = None
+        with get_conn() as conn:
+            backfilled = conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_backfill'").fetchone()
+            attempt = conn.execute("SELECT attempted_at FROM feed_state WHERE feed = 'filings_backfill'").fetchone()
+            due = not attempt or datetime.now(timezone.utc) - datetime.fromisoformat(attempt[0]) >= timedelta(days=1)
+            if not backfilled and due:
+                conn.execute("""INSERT INTO feed_state (feed, attempted_at) VALUES ('filings_backfill', ?)
+                                ON CONFLICT(feed) DO UPDATE SET attempted_at = excluded.attempted_at""",
+                             (datetime.now(timezone.utc).isoformat(),))
+        # A shared session backfills just the portfolio. Stop on the first
+        # API block rather than retrying blocked sessions for every stock.
+        historical = fetch_announcements(tickers, days=120 if not backfilled and due else 2) if (not backfilled and due) or recent is None else []
+        completed_backfill = bool(historical) and not backfilled and due
+        if recent is None and not historical:
+            raise RuntimeError("Live filings are unavailable. Previously saved filings are retained.")
+        for source, items in (("nse_live", historical), ("nse_rss", recent or [])):
+            for item in items:
+                if item.get("symbol") in tickers:
+                    all_items.append((item["symbol"], source, item))
+        # Retry historical backfill daily if it is blocked, while RSS keeps
+        # supplying recent filings. Do not silently load sample announcements.
+    else:
+        for ticker in tickers:
+            all_items.extend((ticker, "seed", item) for item in load_seed_announcements(ticker))
 
-    categories = classify_batch([item for _, _, item in all_items])
+    prepared = {}
+    with get_conn() as conn:
+        for ticker, source, item in all_items:
+            published = _parse_nse_dt(item.get("an_dt", "")) or item.get("sort_date")
+            if not published:
+                continue
+            identity = item.get("attchmntFile") or f"{item.get('desc')}|{item.get('attchmntText')}"
+            key = hashlib.sha256(f"{ticker}|{identity}|{published}".encode()).hexdigest()
+            existing = conn.execute(
+                "SELECT id FROM announcements WHERE ticker = ? AND attachment_url = ? AND published_at = ? LIMIT 1",
+                (ticker, item.get("attchmntFile"), published),
+            ).fetchone() if item.get("attchmntFile") else None
+            ann_id = existing["id"] if existing else f"{ticker}:{key}"
+            if conn.execute("SELECT 1 FROM announcements WHERE id = ?", (ann_id,)).fetchone():
+                continue
+            item = {**item, "seq_id": ann_id}
+            prepared[ann_id] = (ticker, source, item, published)
+    categories = {}
+    items = [p[2] for p in prepared.values()]
+    for offset in range(0, len(items), 40):
+        categories.update(classify_batch(items[offset:offset + 40]))
 
     count = 0
     with get_conn() as conn:
-        for ticker, source, item in all_items:
-            seq_id = str(item.get("seq_id") or item.get("id") or hash(json_key(item)))
-            ann_id = f"{ticker}:{seq_id}"
-            category = categories.get(seq_id, "unclassified")
+        for ann_id, (ticker, source, item, published_at) in prepared.items():
+            category = categories.get(ann_id, "unclassified")
             priority = CATEGORY_PRIORITY.get(category, "low")
-            published_at = _parse_nse_dt(item.get("an_dt", "")) or item.get("sort_date")
-
             conn.execute(
                 """
                 INSERT INTO announcements
@@ -92,11 +122,9 @@ def refresh_all(tickers: list[str] | None = None) -> int:
                 ),
             )
             count += 1
+        if completed_backfill:
+            conn.execute("INSERT OR IGNORE INTO migrations VALUES ('nse_backfill')")
     return count
-
-
-def json_key(item: dict) -> str:
-    return f"{item.get('desc')}|{item.get('an_dt')}|{item.get('symbol')}"
 
 
 def get_digest(window_hours: int = 24) -> dict:
@@ -113,10 +141,14 @@ def get_digest(window_hours: int = 24) -> dict:
             """,
             (cutoff,),
         ).fetchall()
+        latest = conn.execute("SELECT MAX(published_at) FROM announcements WHERE source != 'seed'").fetchone()[0]
+        has_history = conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_backfill'").fetchone() is not None
 
     high, medium, routine = [], [], []
     for r in rows:
         d = dict(r)
+        if USE_LIVE_NSE and d["source"] == "seed":
+            continue
         if d["priority"] == "high":
             high.append(d)
         elif d["priority"] == "medium":
@@ -124,4 +156,5 @@ def get_digest(window_hours: int = 24) -> dict:
         else:
             routine.append(d)
 
-    return {"high": high, "medium": medium, "routine": routine, "window_hours": window_hours}
+    return {"high": high, "medium": medium, "routine": routine, "window_hours": window_hours,
+            "latest_filing": latest, "has_history": has_history, "live_mode": USE_LIVE_NSE}

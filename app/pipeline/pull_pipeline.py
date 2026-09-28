@@ -7,18 +7,20 @@ from the company's own filings.
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
 
-from app.config import BASE_DIR
+from app.config import DATA_DIR
 from app.llm.client import chat_text, embed
 from app.pipeline.documents import chunk_text, fetch_and_extract
 from app.sources.screener_client import get_documents, fetch_soup
+from app.storage import atomic_write
 
 logger = logging.getLogger(__name__)
 
-INDEX_DIR = BASE_DIR / "data" / "rag_index"
+INDEX_DIR = DATA_DIR / "rag_index"
 # promised_vs_delivered needs, for each of the last 4 *reported* quarters,
 # the concall that set guidance for it -- for the oldest of those 4
 # quarters that can reach back ~7-8 transcripts in recency order, so this
@@ -85,8 +87,12 @@ def _document_sources(docs: dict) -> list[dict]:
 def build_index(ticker: str, force: bool = False) -> list[dict]:
     path = _index_path(ticker)
     if path.exists() and not force:
-        with open(path, encoding="utf-8") as f:
-            chunks = json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                chunks = json.load(f)
+        except (ValueError, OSError):
+            logger.warning("Rebuilding unreadable index for %s", ticker)
+            return build_index(ticker, force=True)
         # Older indexes kept labels but dropped URLs. Add the document metadata
         # without downloading PDFs again or replacing existing embeddings.
         if any(not c.get("url") for c in chunks):
@@ -99,8 +105,19 @@ def build_index(ticker: str, force: bool = False) -> list[dict]:
                         chunk["url"] = urls[chunk["label"]]
                         changed = True
                 if changed:
-                    with open(path, "w", encoding="utf-8") as f:
-                        json.dump(chunks, f)
+                    atomic_write(path, json.dumps(chunks).encode("utf-8"))
+        # Recheck document links daily, while preserving the existing index
+        # if Screener is temporarily unavailable.
+        if time.time() - path.stat().st_mtime >= 86400:
+            soup = fetch_soup(ticker)
+            if soup is not None:
+                available = _document_sources(get_documents(soup))
+                wanted = ([s for s in available if s["doc_type"] == "annual_report"][:MAX_ANNUAL_REPORTS]
+                          + [s for s in available if s["doc_type"] == "concall"][:MAX_CONCALLS])
+                current = {(c["label"], c.get("url")) for c in chunks}
+                if {(s["label"], s["url"]) for s in wanted} != current:
+                    return build_index(ticker, force=True) or chunks
+                path.touch()
         return chunks
 
     soup = fetch_soup(ticker)
@@ -130,8 +147,7 @@ def build_index(ticker: str, force: bool = False) -> list[dict]:
         c["embedding"] = e
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(chunks, f)
+    atomic_write(path, json.dumps(chunks).encode("utf-8"))
     return chunks
 
 
@@ -167,7 +183,7 @@ def generate_section(ticker: str, category: str, structured: dict | None = None)
         content = chat_text(prompt, tier="reasoning", system=SYSTEM_PROMPT)
     except Exception as e:
         logger.warning("Pull-mode generation failed for %s/%s: %s", ticker, category, e)
-        content = "Couldn't generate this section right now."
+        raise
 
     source_urls = {c["label"]: c.get("url") for c in chunks}
     sources = [{"label": label, "url": source_urls[label]} for label in sorted(source_urls)]
