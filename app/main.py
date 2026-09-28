@@ -13,6 +13,7 @@ from app.pipeline.digest import get_digest, refresh_all
 from app.pipeline.enrich import get_management_bio, get_results_card
 from app.pipeline.promised_vs_delivered import build_promised_vs_delivered
 from app.pipeline.pull_pipeline import CATEGORY_PROMPTS, DEEP_CATEGORIES, generate_section
+from app.presentation import render_markdown, source_url
 from app.sources.screener_client import get_fundamentals
 from app.sources.yfinance_client import refresh_ticker
 
@@ -30,6 +31,8 @@ PULL_CATEGORY_LABELS = [
 ]
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["markdown"] = render_markdown
+templates.env.filters["source_url"] = source_url
 
 
 @asynccontextmanager

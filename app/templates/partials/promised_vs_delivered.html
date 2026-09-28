@@ -16,7 +16,7 @@
         {{ q.verdict|title }}
       </span>
     </div>
-    <div class="text-sm text-slate-700 dark:text-slate-300">{{ q.rationale }}</div>
+    <div class="research-content text-sm text-slate-700 dark:text-slate-300">{{ q.rationale|markdown }}</div>
     <div class="grid grid-cols-4 gap-1 mt-2 text-xs">
       {% for m in ['revenue', 'ebitda', 'pbt', 'pat'] %}
       <div>
@@ -28,7 +28,15 @@
       {% endfor %}
     </div>
     {% if q.guidance_source %}
-    <div class="text-[10px] text-slate-400 mt-2">Guidance from: Concall {{ q.guidance_source }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-2">
+      Guidance from:
+      {% set url = q.guidance_source_url|default(none)|source_url %}
+      {% if url %}
+      <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="inline-block underline text-blue-600 dark:text-blue-400 py-1">Concall {{ q.guidance_source }}</a>
+      {% else %}
+      Concall {{ q.guidance_source }}
+      {% endif %}
+    </div>
     {% endif %}
   </div>
   {% endfor %}

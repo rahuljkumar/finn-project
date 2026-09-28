@@ -69,23 +69,50 @@ def _index_path(ticker: str) -> Path:
     return INDEX_DIR / f"{ticker}.json"
 
 
+def _document_sources(docs: dict) -> list[dict]:
+    sources = [
+        {"doc_type": "annual_report", "label": f"Annual Report {ar['year']}", "url": ar["url"]}
+        for ar in docs["annual_reports"]
+    ]
+    sources.extend(
+        {"doc_type": "concall", "label": f"Concall {cc['label']}", "url": cc["transcript_url"]}
+        for cc in docs["concalls"]
+        if cc.get("transcript_url")
+    )
+    return sources
+
+
 def build_index(ticker: str, force: bool = False) -> list[dict]:
     path = _index_path(ticker)
     if path.exists() and not force:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            chunks = json.load(f)
+        # Older indexes kept labels but dropped URLs. Add the document metadata
+        # without downloading PDFs again or replacing existing embeddings.
+        if any(not c.get("url") for c in chunks):
+            soup = fetch_soup(ticker)
+            if soup is not None:
+                urls = {s["label"]: s["url"] for s in _document_sources(get_documents(soup))}
+                changed = False
+                for chunk in chunks:
+                    if not chunk.get("url") and urls.get(chunk["label"]):
+                        chunk["url"] = urls[chunk["label"]]
+                        changed = True
+                if changed:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(chunks, f)
+        return chunks
 
     soup = fetch_soup(ticker)
     if soup is None:
         return []
     docs = get_documents(soup)
 
-    sources = []
-    for ar in docs["annual_reports"][:MAX_ANNUAL_REPORTS]:
-        sources.append({"doc_type": "annual_report", "label": f"Annual Report {ar['year']}", "url": ar["url"]})
-    for cc in docs["concalls"][:MAX_CONCALLS]:
-        if cc.get("transcript_url"):
-            sources.append({"doc_type": "concall", "label": f"Concall {cc['label']}", "url": cc["transcript_url"]})
+    available = _document_sources(docs)
+    sources = (
+        [s for s in available if s["doc_type"] == "annual_report"][:MAX_ANNUAL_REPORTS]
+        + [s for s in available if s["doc_type"] == "concall"][:MAX_CONCALLS]
+    )
 
     chunks = []
     for src in sources:
@@ -93,7 +120,7 @@ def build_index(ticker: str, force: bool = False) -> list[dict]:
         if not text:
             continue
         for i, chunk in enumerate(chunk_text(text)):
-            chunks.append({"doc_type": src["doc_type"], "label": src["label"], "chunk_index": i, "text": chunk})
+            chunks.append({"doc_type": src["doc_type"], "label": src["label"], "url": src["url"], "chunk_index": i, "text": chunk})
 
     if not chunks:
         return []
@@ -142,5 +169,6 @@ def generate_section(ticker: str, category: str, structured: dict | None = None)
         logger.warning("Pull-mode generation failed for %s/%s: %s", ticker, category, e)
         content = "Couldn't generate this section right now."
 
-    sources = sorted({c["label"] for c in chunks})
+    source_urls = {c["label"]: c.get("url") for c in chunks}
+    sources = [{"label": label, "url": source_urls[label]} for label in sorted(source_urls)]
     return {"content": content, "sources": sources}

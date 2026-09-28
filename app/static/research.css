@@ -1,0 +1,36 @@
+.research-content {
+  line-height: 1.6;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+}
+.research-content > :first-child { margin-top: 0; }
+.research-content > :last-child { margin-bottom: 0; }
+.research-content p { margin: 0.6rem 0; }
+.research-content h1, .research-content h2, .research-content h3,
+.research-content h4, .research-content h5, .research-content h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1rem 0 0.4rem;
+}
+.research-content ul, .research-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+}
+.research-content ul { list-style: disc; }
+.research-content ol { list-style: decimal; }
+.research-content li { margin: 0.25rem 0; }
+.research-content a { color: #2563eb; text-decoration: underline; }
+.research-content table { border-collapse: collapse; margin: 0.75rem 0; width: 100%; }
+.research-content th, .research-content td {
+  border: 1px solid #94a3b8;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  min-width: 5rem;
+}
+.research-content th { font-weight: 600; }
+.research-content blockquote { border-left: 3px solid #94a3b8; padding-left: 0.75rem; }
+.research-content pre { overflow-x: auto; padding: 0.5rem; }
+.research-content code { font-size: 0.9em; }
+.research-loading { display: none; }
+.research-section.htmx-request > .research-loading { display: block; }
+.research-section.htmx-request > .research-result { display: none; }

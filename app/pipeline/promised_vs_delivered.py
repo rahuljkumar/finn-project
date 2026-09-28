@@ -140,6 +140,7 @@ def build_promised_vs_delivered(ticker: str, n_quarters: int = 4) -> list[dict]:
                 "rationale": parsed.get("rationale", ""),
                 "actual": actual_with_qoq,
                 "guidance_source": guidance_concall["label"],
+                "guidance_source_url": guidance_concall["transcript_url"],
             }
         )
 

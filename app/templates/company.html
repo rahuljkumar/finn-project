@@ -13,6 +13,8 @@
     hx-target="#section-pvd"
     hx-swap="innerHTML"
     hx-trigger="click"
+    hx-indicator="#panel-pvd"
+    hx-disabled-elt="this"
     class="text-left rounded-xl border-2 border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 p-3">
     <div class="flex items-center justify-between">
       <span class="font-medium text-sm">Promised vs. Delivered</span>
@@ -22,7 +24,10 @@
     </div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Last 4 quarters, guidance vs. actual</div>
   </button>
-  <div x-show="open === 'pvd'" x-cloak id="section-pvd" class="text-sm text-slate-400 px-1">Click to load&hellip;</div>
+  <div x-show="open === 'pvd'" x-cloak id="panel-pvd" class="research-section text-sm px-1">
+    <div class="research-loading text-slate-500 dark:text-slate-400" role="status" aria-live="polite">Loading&hellip;</div>
+    <div id="section-pvd" class="research-result"></div>
+  </div>
 
   {% for key, label in categories %}
   <button
@@ -31,6 +36,8 @@
     hx-target="#section-{{ key }}"
     hx-swap="innerHTML"
     hx-trigger="click"
+    hx-indicator="#panel-{{ key }}"
+    hx-disabled-elt="this"
     class="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
     <div class="flex items-center justify-between">
       <span class="font-medium text-sm">{{ label }}</span>
@@ -39,7 +46,10 @@
       </svg>
     </div>
   </button>
-  <div x-show="open === '{{ key }}'" x-cloak id="section-{{ key }}" class="text-sm text-slate-400 px-1 -mt-2">Click to load&hellip;</div>
+  <div x-show="open === '{{ key }}'" x-cloak id="panel-{{ key }}" class="research-section text-sm px-1 -mt-2">
+    <div class="research-loading text-slate-500 dark:text-slate-400" role="status" aria-live="polite">Loading&hellip;</div>
+    <div id="section-{{ key }}" class="research-result"></div>
+  </div>
   {% endfor %}
 </div>
 {% endblock %}
