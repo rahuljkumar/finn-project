@@ -82,11 +82,13 @@ def detect_anomaly(
             "SELECT * FROM prices WHERE ticker = ? ORDER BY date DESC LIMIT 1",
             (ticker,),
         ).fetchone()
-    if row is None or row["avg_volume_20d"] is None:
+    if row is None:
         return None
 
     reasons = []
-    if row["avg_volume_20d"] and row["volume"] > volume_multiple * row["avg_volume_20d"]:
+    if (row["volume"] is not None and row["avg_volume_20d"] is not None
+            and row["avg_volume_20d"] > 0
+            and row["volume"] > volume_multiple * row["avg_volume_20d"]):
         reasons.append(
             f"Volume {row['volume']:,} is {row['volume'] / row['avg_volume_20d']:.1f}x its 20-day average"
         )

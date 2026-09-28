@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block header_right %}
-<a href="/alerts?refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
+<a href="/alerts?vol_mult={{ vol_mult }}&amp;price_pct={{ price_pct }}&amp;refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
 {% endblock %}
 {% block content %}
 <div class="flex flex-col gap-4">
@@ -14,13 +14,13 @@
     <div class="flex flex-col gap-2 text-sm">
       <label class="flex items-center gap-1.5 whitespace-nowrap">
         <span>Volume &gt;</span>
-        <input type="number" step="0.1" min="1" name="vol_mult" value="{{ vol_mult }}"
+        <input type="number" step="0.1" min="1" required name="vol_mult" value="{{ vol_mult }}"
                class="w-16 rounded border border-slate-300 dark:border-slate-700 bg-transparent px-1.5 py-0.5" />
         <span>&times; 20-day avg</span>
       </label>
       <label class="flex items-center gap-1.5 whitespace-nowrap">
         <span>Price move &plusmn;</span>
-        <input type="number" step="0.5" min="0" name="price_pct" value="{{ price_pct }}"
+        <input type="number" step="0.5" min="0" required name="price_pct" value="{{ price_pct }}"
                class="w-16 rounded border border-slate-300 dark:border-slate-700 bg-transparent px-1.5 py-0.5" />
         <span>%</span>
       </label>
@@ -28,8 +28,31 @@
     </div>
   </form>
 
+  {% if refresh_summary %}
+  <div role="status" class="text-sm text-slate-500 dark:text-slate-400">
+    Updated prices for {{ refresh_summary.refreshed }} of {{ refresh_summary.total }} stocks.
+    {% if refresh_summary.failed %}
+    Could not fetch prices for {{ refresh_summary.failed|length }} of your stocks. Previously saved prices are used where available; try Refresh again later.
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if not price_data.loaded %}
+  <div role="status" class="text-sm text-slate-500 dark:text-slate-400 mt-2">
+    No price data loaded yet. Tap Refresh to load prices before checking these thresholds.
+  </div>
+  {% elif not price_data.available %}
+  <div role="status" class="text-sm text-slate-500 dark:text-slate-400 mt-2">
+    Not enough price history to evaluate alerts. Tap Refresh to load more data.
+  </div>
+  {% else %}
+  <div class="text-xs text-slate-500 dark:text-slate-400">
+    Price data: {{ price_data.available }} of {{ price_data.total }} stocks &middot; Latest trading date: {{ price_data.latest_date }}
+    {% if price_data.available < price_data.total %}<div>Some stocks have no usable price data and could not be checked.</div>{% endif %}
+  </div>
   {% if not price_volume and not announcements %}
-  <div class="text-sm text-slate-500 dark:text-slate-400 mt-4">No active alerts right now.</div>
+  <div class="text-sm text-slate-500 dark:text-slate-400 mt-2">No matching alerts at these thresholds.</div>
+  {% endif %}
   {% endif %}
 
   {% if price_volume %}
@@ -41,7 +64,7 @@
         <div class="flex items-center justify-between">
           <span class="font-medium text-sm">{{ a.ticker }}</span>
           <span class="text-sm {{ 'text-green-600' if a.pct_change and a.pct_change > 0 else 'text-red-600' }}">
-            {{ '%+.1f'|format(a.pct_change) }}%
+            {% if a.pct_change is not none %}{{ '%+.1f'|format(a.pct_change) }}%{% else %}&mdash;{% endif %}
           </span>
         </div>
         <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">

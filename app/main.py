@@ -1,21 +1,20 @@
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.config import ALERT_PRICE_MOVE_PCT, ALERT_VOLUME_MULTIPLE, all_tickers, load_portfolio
+from app.config import ALERT_PRICE_MOVE_PCT, ALERT_VOLUME_MULTIPLE, load_portfolio
 from app.db import get_conn, init_db
-from app.pipeline.alerts import get_all_alerts
+from app.pipeline.alerts import get_all_alerts, refresh_price_history
 from app.pipeline.digest import get_digest, refresh_all
 from app.pipeline.enrich import get_management_bio, get_results_card
 from app.pipeline.promised_vs_delivered import build_promised_vs_delivered
 from app.pipeline.pull_pipeline import CATEGORY_PROMPTS, DEEP_CATEGORIES, generate_section
 from app.presentation import render_markdown, source_url
 from app.sources.screener_client import get_fundamentals
-from app.sources.yfinance_client import refresh_ticker
 
 TICKER_RE = re.compile(r"^[A-Z0-9&\-]{1,20}$")
 
@@ -76,12 +75,10 @@ def digest(request: Request, hours: int = 24, refresh: bool = False):
 def alerts(
     request: Request,
     refresh: bool = False,
-    vol_mult: float = ALERT_VOLUME_MULTIPLE,
-    price_pct: float = ALERT_PRICE_MOVE_PCT,
+    vol_mult: float = Query(default=ALERT_VOLUME_MULTIPLE, ge=1),
+    price_pct: float = Query(default=ALERT_PRICE_MOVE_PCT, ge=0),
 ):
-    if refresh:
-        for ticker in all_tickers():
-            refresh_ticker(ticker)
+    refresh_summary = refresh_price_history() if refresh else None
     data = get_all_alerts(volume_multiple=vol_mult, price_move_pct=price_pct)
     return templates.TemplateResponse(
         request,
@@ -91,6 +88,7 @@ def alerts(
             "active": "alerts",
             "vol_mult": vol_mult,
             "price_pct": price_pct,
+            "refresh_summary": refresh_summary,
             **data,
         },
     )
