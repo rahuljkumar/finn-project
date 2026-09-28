@@ -117,6 +117,7 @@ class ReliabilityTests(unittest.TestCase):
              patch.object(digest, "USE_LIVE_NSE", True), \
              patch.object(digest, "fetch_recent_announcements", side_effect=RuntimeError("Offline")), \
              patch.object(digest, "fetch_announcements", return_value=[]), \
+             patch.object(digest, "fetch_search_announcements", side_effect=RuntimeError("Search offline")), \
              patch.object(digest, "load_seed_announcements") as seed, \
              self.assertLogs("app.pipeline.digest", level="WARNING"):
             with self.assertRaises(RuntimeError):

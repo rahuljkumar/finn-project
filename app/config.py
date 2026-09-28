@@ -20,6 +20,8 @@ AUTO_REFRESH = os.getenv("AUTO_REFRESH", "true").lower() == "true"
 USE_LIVE_NSE = os.getenv("USE_LIVE_NSE", "true").lower() == "true"
 USE_LIVE_BSE = os.getenv("USE_LIVE_BSE", "true").lower() == "true"
 USE_LIVE_SCREENER = os.getenv("USE_LIVE_SCREENER", "true").lower() == "true"
+USE_DIGEST_WEB_SEARCH = os.getenv("USE_DIGEST_WEB_SEARCH", "true").lower() == "true"
+DIGEST_SEARCH_MODEL = os.getenv("DIGEST_SEARCH_MODEL") or REASONING_MODEL
 
 ALERT_VOLUME_MULTIPLE = float(os.getenv("ALERT_VOLUME_MULTIPLE", "2.0"))
 ALERT_PRICE_MOVE_PCT = float(os.getenv("ALERT_PRICE_MOVE_PCT", "5.0"))

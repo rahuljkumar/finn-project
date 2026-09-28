@@ -103,6 +103,57 @@ def web_search_answer(prompt: str, tier: str = "reasoning") -> str:
     return text
 
 
+def search_filings(prompt: str, domains: list[str], model: str) -> dict:
+    """Uncached discovery: the Digest collector controls its durable cooldown.
+
+    Return provider provenance alongside JSON. URLs must subsequently pass
+    document verification or an explicit provider-open check.
+    """
+    fields = {name: {"type": "string"} for name in (
+        "ticker", "source_url", "published_date", "headline",
+        "company_evidence", "date_evidence", "content_evidence",
+    )}
+    resp = get_client().with_options(timeout=120.0, max_retries=0).responses.create(
+        model=model,
+        input=prompt,
+        tools=[{"type": "web_search", "filters": {"allowed_domains": domains}}],
+        tool_choice="required",
+        include=["web_search_call.action.sources"],
+        max_tool_calls=8,
+        parallel_tool_calls=False,
+        max_output_tokens=7000,
+        text={"format": {
+            "type": "json_schema", "name": "corporate_filings", "strict": True,
+            "schema": {"type": "object", "properties": {"filings": {
+                "type": "array", "items": {"type": "object", "properties": fields,
+                                            "required": list(fields), "additionalProperties": False},
+            }}, "required": ["filings"], "additionalProperties": False},
+        }},
+    )
+    if resp.status != "completed":
+        raise ValueError("Filing search did not complete")
+    sources, opened, searched = set(), set(), False
+    for output in resp.output:
+        data = output.model_dump()
+        if data.get("type") == "web_search_call" and data.get("status") == "completed":
+            searched = True
+            action = data.get("action") or {}
+            sources.update(s["url"] for s in (action.get("sources") or []) if s.get("url"))
+            if action.get("type") == "open_page" and action.get("url"):
+                opened.add(action["url"])
+                sources.add(action["url"])
+        if data.get("type") == "message":
+            for part in (data.get("content") or []):
+                sources.update(a["url"] for a in (part.get("annotations") or [])
+                               if a.get("type") == "url_citation" and a.get("url"))
+    if not searched:
+        raise ValueError("Filing search returned no web provenance")
+    payload = json.loads(resp.output_text)
+    if not isinstance(payload, dict) or not isinstance(payload.get("filings"), list):
+        raise ValueError("Invalid filing search response")
+    return {"filings": payload["filings"], "sources": sorted(sources), "opened": sorted(opened)}
+
+
 EMBED_BATCH_SIZE = 100  # keep well under the embeddings endpoint's per-request token/item limits
 
 

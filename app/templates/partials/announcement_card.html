@@ -9,9 +9,13 @@
     </span>
   </div>
   <div class="text-sm text-slate-700 dark:text-slate-300">{{ item.headline }}</div>
-  <div class="flex items-center justify-between mt-2">
-    <span class="text-xs text-slate-400">{{ item.published_at[:16].replace('T', ' ') if item.published_at else '' }} &middot; {{ item.source }}</span>
-    <div class="flex items-center gap-3">
+  <div class="flex flex-wrap items-center justify-between gap-2 mt-2">
+    <span class="text-xs text-slate-400">
+      {% if item.source == 'web_search' %}
+      {{ item.search_metadata.source_date if item.search_metadata is defined else (item.published_at|display_time).split(',')[0] }} (time unavailable) &middot; {{ item.exchange }} &middot; Search-discovered
+      {% else %}{{ item.published_at|display_time }} &middot; {{ item.source }}{% endif %}
+    </span>
+    <div class="flex shrink-0 items-center gap-3">
       {% if item.category in ('management_change', 'results') %}
       <button
         hx-get="/enrich/{{ item.id }}"
@@ -21,11 +25,16 @@
         {{ 'Who is this?' if item.category == 'management_change' else 'QoQ/YoY' }}
       </button>
       {% endif %}
-      {% if item.attachment_url %}
-      <a href="{{ item.attachment_url }}" target="_blank" class="text-xs text-blue-600 dark:text-blue-400">Filing &rarr;</a>
+      {% if item.attachment_url|source_url %}
+      <a href="{{ item.attachment_url|source_url }}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 dark:text-blue-400">Filing &rarr;</a>
       {% endif %}
     </div>
   </div>
+  {% if item.source == 'web_search' %}
+  <p class="text-[11px] text-slate-500 mt-1">Date-only disclosure: included if its day overlaps your window.
+    {% if item.search_metadata is defined and item.search_metadata.verification == 'search_provider' %}Document read by the search provider; direct verification was unavailable.{% endif %}
+  </p>
+  {% endif %}
   {% if item.category in ('management_change', 'results') %}
   <div id="enrich-{{ item.id|replace(':', '-') }}" class="enrichment"></div>
   {% endif %}

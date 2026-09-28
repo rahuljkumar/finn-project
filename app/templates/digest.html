@@ -25,6 +25,14 @@
   </div>
 
   {% include "partials/feed_status.html" %}
+  {% if live_mode and filing_search.summary.active %}
+  <div class="text-xs text-amber-700 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-900 p-3">
+    Exchange feed unavailable. Web-search fallback checks original company and exchange disclosures.
+    Coverage is incomplete; an empty list does not confirm that no filings were published.
+    {% if filing_search.succeeded_at %}<br>Last search: {{ filing_search.succeeded_at|display_time }}. Searches run at most once every 6 hours.{% endif %}
+    {% if filing_search.error %}<br>{{ filing_search.error }}{% endif %}
+  </div>
+  {% endif %}
   {% if live_mode and not has_history %}
   <p class="text-xs text-slate-500 dark:text-slate-400">Recent filings are collected continuously. Historical backfill is pending; longer windows may be incomplete.</p>
   {% elif not live_mode %}
