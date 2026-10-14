@@ -1,0 +1,18 @@
+<div id="document-panel" class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-xs"
+     {% if document_job and document_job.state == 'running' %}hx-get="/research/{{ ticker|urlencode }}/documents" hx-trigger="every 3s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <div class="flex items-center justify-between gap-3">
+    <span class="font-medium">Company reports</span>
+    <button hx-post="/research/{{ ticker|urlencode }}/documents" hx-target="#document-panel" hx-swap="outerHTML" hx-disabled-elt="this"
+            class="text-blue-600 dark:text-blue-400 underline">Check reports</button>
+  </div>
+  {% if document_job and document_job.state == 'running' %}<p class="text-blue-600 mt-2">Preparing reports&hellip; Existing research remains available.</p>
+  {% elif document_job and document_job.state == 'error' %}<p class="text-amber-600 mt-2">{{ document_job.error }}</p>{% endif %}
+  {% if documents.checked_at %}<p class="text-slate-500 mt-2">Last check: {{ documents.checked_at|display_time }}</p>{% endif %}
+  {% if documents.labels %}<details class="mt-2"><summary class="cursor-pointer">{{ documents.labels|length }} indexed reports</summary><p class="text-slate-500 mt-1">{{ documents.labels|join(', ') }}</p></details>
+  {% elif documents.ready %}<p class="text-slate-500 mt-2">Saved reports are available. Check reports to update their coverage.</p>
+  {% else %}<p class="text-slate-500 mt-2">Research becomes available when source reports are prepared.</p>{% endif %}
+  {% if documents.failed %}<p class="text-amber-600 mt-2">{{ documents.failed }} reports could not be indexed. Previously saved reports are retained.</p>{% endif %}
+  {% if document_job and document_job.state == 'ready' and document_job.result %}
+  <p class="text-slate-500 mt-2">{{ document_job.result.new }} new · {{ document_job.result.indexed }} indexed · {{ document_job.result.unchanged }} unchanged</p>
+  {% endif %}
+</div>

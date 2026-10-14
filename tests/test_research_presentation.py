@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from test_support import isolate_background
 
 from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
@@ -21,6 +22,7 @@ DOCS = {
 
 class ResearchPresentationTests(unittest.TestCase):
     def setUp(self):
+        isolate_background(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         db_patch = patch("app.db.DB_PATH", str(Path(folder.name) / "research.db"))
@@ -60,10 +62,10 @@ class ResearchPresentationTests(unittest.TestCase):
                         {"label": "Concall Jul 2026", "text": "Call excerpt", "embedding": [3, 4]}]
             path.write_text(json.dumps(original), encoding="utf-8")
             with patch.object(pull, "INDEX_DIR", Path(folder)), \
-                 patch.object(pull, "fetch_soup", return_value=object()) as fetch, \
+                 patch.object(pull, "fetch_soup", return_value=BeautifulSoup("<html/>", "html.parser")) as fetch, \
                  patch.object(pull, "get_documents", return_value=DOCS), \
                  patch.object(pull, "embed") as embed, \
-                 patch.object(pull, "fetch_and_extract") as download:
+                 patch.object(pull, "fetch_document") as download:
                 updated = pull.build_index("TEST")
                 self.assertEqual(updated[0]["url"], DOCS["annual_reports"][0]["url"])
                 self.assertEqual(updated[1]["url"], DOCS["concalls"][0]["transcript_url"])
@@ -71,16 +73,18 @@ class ResearchPresentationTests(unittest.TestCase):
                 self.assertEqual(json.loads(path.read_text(encoding="utf-8")), updated)
                 embed.assert_not_called()
                 download.assert_not_called()
-                pull.build_index("TEST")
+                pull.load_index("TEST")
                 fetch.assert_called_once()
 
     def test_new_index_retains_the_downloaded_document_url(self):
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(pull, "INDEX_DIR", Path(folder)), \
-             patch.object(pull, "fetch_soup", return_value=object()), \
+             patch.object(pull, "fetch_soup", return_value=BeautifulSoup("<html/>", "html.parser")), \
              patch.object(pull, "get_documents", return_value=DOCS), \
-             patch.object(pull, "fetch_and_extract", return_value="A short source excerpt."), \
-             patch.object(pull, "embed", return_value=[[1, 0], [0, 1]]):
+             patch.object(pull, "fetch_document", side_effect=[
+                 {"content_hash": "annual", "pages": [{"page": 1, "text": "Annual excerpt"}]},
+                 {"content_hash": "call", "pages": [{"page": 2, "text": "Call excerpt"}]}]), \
+             patch.object(pull, "embed", return_value=[[1, 0]]):
             chunks = pull.build_index("TEST")
             self.assertEqual([c["url"] for c in chunks],
                              [DOCS["annual_reports"][0]["url"], DOCS["concalls"][0]["transcript_url"]])

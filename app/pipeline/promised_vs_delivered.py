@@ -10,8 +10,7 @@ from datetime import datetime
 import numpy as np
 
 from app.llm.client import chat_json, embed
-from app.pipeline.pull_pipeline import SYSTEM_PROMPT, build_index
-from app.sources.screener_client import fetch_soup, get_documents, get_quarterly_table
+from app.pipeline.pull_pipeline import SYSTEM_PROMPT, load_index, get_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -52,23 +51,20 @@ def _retrieve_within(chunks: list[dict], label: str, query: str, k: int = 5) -> 
 
 
 def build_promised_vs_delivered(ticker: str, n_quarters: int = 4) -> list[dict]:
-    soup = fetch_soup(ticker)
-    if soup is None:
-        return []
-
-    quarters_table = get_quarterly_table(soup)
+    snapshot = get_snapshot(ticker)
+    quarters_table = snapshot.get("quarters", {})
     quarter_labels = list(quarters_table.keys())
     if len(quarter_labels) < n_quarters + 1:
         return []
 
-    docs = get_documents(soup)
+    docs = snapshot.get("documents", {"concalls": []})
     concalls_with_dates = [
         {**c, "date": _parse_period(c["label"])}
         for c in docs["concalls"]
         if c.get("transcript_url") and _parse_period(c["label"])
     ]
 
-    chunks = build_index(ticker)
+    chunks = load_index(ticker)
     results = []
 
     target_labels = quarter_labels[-n_quarters:]
@@ -141,6 +137,7 @@ def build_promised_vs_delivered(ticker: str, n_quarters: int = 4) -> list[dict]:
                 "actual": actual_with_qoq,
                 "guidance_source": guidance_concall["label"],
                 "guidance_source_url": guidance_concall["transcript_url"],
+                "guidance_excerpt": guidance_text,
             }
         )
 

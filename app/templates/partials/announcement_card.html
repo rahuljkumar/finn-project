@@ -16,13 +16,17 @@
       {% else %}{{ item.published_at|display_time }} &middot; {{ item.source }}{% endif %}
     </span>
     <div class="flex shrink-0 items-center gap-3">
-      {% if item.category in ('management_change', 'results') %}
+      {% if item.priority not in ('high', 'medium') %}
+      <button hx-post="/digest/articles/{{ item.id|urlencode }}/summary" hx-target="#summary-{{ item.id|replace(':', '-') }}"
+              hx-swap="innerHTML" hx-disabled-elt="this" class="text-xs text-blue-600 dark:text-blue-400">Generate AI summary</button>
+      {% endif %}
+      {% if item.category == 'results' %}
       <button
         hx-get="/enrich/{{ item.id }}"
         hx-target="#enrich-{{ item.id|replace(':', '-') }}"
         hx-swap="innerHTML"
         class="text-xs text-blue-600 dark:text-blue-400">
-        {{ 'Who is this?' if item.category == 'management_change' else 'QoQ/YoY' }}
+        QoQ/YoY
       </button>
       {% endif %}
       {% if item.attachment_url|source_url %}
@@ -38,4 +42,5 @@
   {% if item.category in ('management_change', 'results') %}
   <div id="enrich-{{ item.id|replace(':', '-') }}" class="enrichment"></div>
   {% endif %}
+  {% if item.priority not in ('high', 'medium') %}<div id="summary-{{ item.id|replace(':', '-') }}"></div>{% endif %}
 </div>

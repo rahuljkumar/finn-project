@@ -1,0 +1,20 @@
+{% if result %}
+<div class="ai-content text-sm">
+  {% if result.status_label %}<div class="text-xs font-medium text-blue-600 dark:text-blue-400 mb-2">{{ result.status_label }}</div>{% endif %}
+  <div class="research-content">{{ result.content|markdown }}</div>
+  {% if result.coverage %}
+  <p class="text-xs text-slate-500 mt-2">Based on {{ result.coverage.read }} of {{ result.coverage.total }} source documents.
+    {% if result.coverage.partial %}Some source details could not be prepared. Retry for complete coverage.{% endif %}</p>
+  {% endif %}
+  {% if result.sources %}
+  <div class="flex flex-wrap gap-2 mt-3">
+    {% for source in result.sources %}
+      {% if source.url|source_url %}
+      <a href="{{ source.url|source_url }}" target="_blank" rel="noopener noreferrer"
+         class="text-xs text-blue-600 dark:text-blue-400 underline">{% if source.id %}[{{ source.id }}] {% endif %}{{ source.label }}{% if source.published_at %} · {{ source.published_at }}{% endif %}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

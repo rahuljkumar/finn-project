@@ -1,0 +1,11 @@
+<div class="mt-3" role="status" aria-live="polite"
+     {% if job.state == 'running' %}hx-get="/ai/results/{{ job.job_key|urlencode }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  {% if job.state == 'ready' %}
+    {% with result=job.result %}{% include "partials/ai_content.html" %}{% endwith %}
+    <p class="text-[11px] text-slate-400 mt-2">Prepared {{ job.updated_at|display_time }}</p>
+  {% elif job.state == 'running' %}
+    <p class="text-xs text-blue-600 dark:text-blue-400">Preparing a sourced answer&hellip;</p>
+  {% else %}
+    <p class="text-xs text-amber-700 dark:text-amber-300">{{ job.error or 'Could not prepare this answer. Retry shortly.' }}</p>
+  {% endif %}
+</div>

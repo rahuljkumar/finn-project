@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from test_support import isolate_background
 
 import requests
 from fastapi.testclient import TestClient
@@ -30,6 +31,7 @@ RESULT = {"filings": [FILING], "sources": [URL], "opened": []}
 
 class DigestSearchTests(unittest.TestCase):
     def setUp(self):
+        isolate_background(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         db_patch = patch("app.db.DB_PATH", str(Path(folder.name) / "test.db"))

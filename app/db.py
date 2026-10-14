@@ -60,6 +60,39 @@ CREATE TABLE IF NOT EXISTS research_cache (
     payload TEXT NOT NULL,
     saved_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS research_documents (
+    ticker TEXT NOT NULL,
+    url TEXT NOT NULL,
+    label TEXT NOT NULL,
+    doc_type TEXT NOT NULL,
+    content_hash TEXT,
+    status TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (ticker, url)
+);
+
+CREATE TABLE IF NOT EXISTS research_snapshots (
+    ticker TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    saved_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_jobs (
+    job_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    payload TEXT,
+    error TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_facts (
+    cache_key TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    saved_at TEXT NOT NULL
+);
 """
 
 

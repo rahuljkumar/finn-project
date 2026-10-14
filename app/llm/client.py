@@ -10,11 +10,13 @@ guess at it.
 import hashlib
 import json
 import logging
+import re
 
 from openai import OpenAI
 
-from app.config import CHEAP_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY, REASONING_MODEL
+from app.config import CHEAP_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY, REASONING_MODEL, WEB_SEARCH_MODEL
 from app.llm.cache import get_cached, set_cached
+from app.presentation import source_url
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,49 @@ def web_search_answer(prompt: str, tier: str = "reasoning") -> str:
     return text
 
 
+def search_with_sources(prompt: str) -> dict:
+    """A dated search result with provider-verified URLs, not timeless prose."""
+    schema = {"type": "object", "properties": {
+        "content": {"type": "string"},
+        "status": {"type": "string", "enum": ["reported", "related", "no_news", "found", "not_found"]},
+        "sources": {"type": "array", "items": {"type": "object", "properties": {
+            "url": {"type": "string"}, "label": {"type": "string"},
+            "published_at": {"type": "string"}, "evidence": {"type": "string"}},
+            "required": ["url", "label", "published_at", "evidence"], "additionalProperties": False}},
+    }, "required": ["content", "status", "sources"], "additionalProperties": False}
+    response = get_client().responses.create(
+        model=WEB_SEARCH_MODEL,
+        input=prompt + "\nRead relevant sources. Return a short supported answer and the actual source URLs, "
+              "publication dates and evidence excerpts. Do not guess names, dates or causes. "
+              "Use no_news/not_found if reliable evidence is unavailable. Return JSON matching the schema.",
+        tools=[{"type": "web_search"}], tool_choice="required",
+        include=["web_search_call.action.sources"], max_tool_calls=5,
+        max_output_tokens=2500,
+        text={"format": {"type": "json_schema", "name": "sourced_search", "strict": True, "schema": schema}},
+    )
+    if response.status != "completed":
+        raise ValueError("Search did not complete")
+    provenance = set()
+    for output in response.output:
+        data = output.model_dump()
+        if data.get("type") == "web_search_call" and data.get("status") == "completed":
+            action = data.get("action") or {}
+            provenance.update(s["url"] for s in action.get("sources", []) if s.get("url"))
+            if action.get("type") == "open_page" and action.get("url"):
+                provenance.add(action["url"])
+        for part in data.get("content", []):
+            provenance.update(a["url"] for a in part.get("annotations", [])
+                              if a.get("type") == "url_citation" and a.get("url"))
+    result = json.loads(response.output_text)
+    result["content"] = re.sub(r"cite.*?", "", result["content"])
+    result["sources"] = [s for s in result["sources"] if source_url(s.get("url"))
+                         and s["url"] in provenance and s.get("evidence")]
+    result["sources"] = list({s["url"]: s for s in result["sources"]}.values())[:5]
+    if result["status"] in {"reported", "related", "found"} and not result["sources"]:
+        raise ValueError("Search answer lacks verified sources")
+    return result
+
+
 def search_filings(prompt: str, domains: list[str], model: str) -> dict:
     """Uncached discovery: the Digest collector controls its durable cooldown.
 
@@ -172,7 +217,10 @@ def embed(texts: list[str]) -> list[list[float]]:
     for batch_start in range(0, len(to_fetch), EMBED_BATCH_SIZE):
         batch = to_fetch[batch_start : batch_start + EMBED_BATCH_SIZE]
         resp = get_client().embeddings.create(model=EMBEDDING_MODEL, input=[t for _, t in batch])
-        for (i, t), item in zip(batch, resp.data):
+        ordered = sorted(resp.data, key=lambda item: item.index)
+        if [item.index for item in ordered] != list(range(len(batch))):
+            raise ValueError("Embedding response does not match the requested batch")
+        for (i, t), item in zip(batch, ordered, strict=True):
             results[i] = item.embedding
             set_cached(_cache_key("embed", EMBEDDING_MODEL, t), json.dumps(item.embedding), EMBEDDING_MODEL)
 

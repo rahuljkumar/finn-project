@@ -22,6 +22,9 @@ USE_LIVE_BSE = os.getenv("USE_LIVE_BSE", "true").lower() == "true"
 USE_LIVE_SCREENER = os.getenv("USE_LIVE_SCREENER", "true").lower() == "true"
 USE_DIGEST_WEB_SEARCH = os.getenv("USE_DIGEST_WEB_SEARCH", "true").lower() == "true"
 DIGEST_SEARCH_MODEL = os.getenv("DIGEST_SEARCH_MODEL") or REASONING_MODEL
+WEB_SEARCH_MODEL = os.getenv("WEB_SEARCH_MODEL") or DIGEST_SEARCH_MODEL
+DOCUMENT_SYNC_HOUR = int(os.getenv("DOCUMENT_SYNC_HOUR", "18"))
+DOCUMENT_SYNC_MINUTE = int(os.getenv("DOCUMENT_SYNC_MINUTE", "30"))
 
 ALERT_VOLUME_MULTIPLE = float(os.getenv("ALERT_VOLUME_MULTIPLE", "2.0"))
 ALERT_PRICE_MOVE_PCT = float(os.getenv("ALERT_PRICE_MOVE_PCT", "5.0"))

@@ -109,6 +109,8 @@ def detect_anomaly(
         "date": row["date"],
         "close": row["close"],
         "volume": row["volume"],
+        "volume_ratio": (row["volume"] / row["avg_volume_20d"]
+                         if row["volume"] is not None and row["avg_volume_20d"] and row["avg_volume_20d"] > 0 else None),
         "pct_change": row["pct_change"],
         "reasons": reasons,
     }

@@ -5,6 +5,7 @@ re-fetch or re-parse the same document."""
 
 import hashlib
 import logging
+import re
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -63,6 +64,42 @@ def fetch_and_extract(url: str) -> str | None:
     if pdf_bytes is None:
         return None
     return extract_text(pdf_bytes)
+
+
+def fetch_document(url: str) -> dict | None:
+    """Keep the original page numbers so retrieval and summaries can cite them."""
+    raw = download_pdf(url)
+    if raw is None:
+        return None
+    with fitz.open(stream=raw, filetype="pdf") as doc:
+        pages = [{"page": i + 1, "text": page.get_text()} for i, page in enumerate(doc)]
+    if not any(p["text"].strip() for p in pages):
+        return None
+    return {"content_hash": hashlib.sha256(raw).hexdigest(), "pages": pages}
+
+
+def document_chunks(document: dict) -> list[dict]:
+    result = []
+    for page in document["pages"]:
+        for text in chunk_text(page["text"]):
+            result.append({"text": text, "page": page["page"], "chunk_index": len(result)})
+    return result
+
+
+def evidence_parts(document: dict, max_chars: int = 14000) -> list[str]:
+    """Bound model inputs without discarding the later pages of a disclosure."""
+    parts, current = [], ""
+    for page in document["pages"]:
+        text = re.sub(r"\s+", " ", page["text"]).strip()
+        for offset in range(0, len(text), max_chars - 100):
+            block = f"[Page {page['page']}] {text[offset:offset + max_chars - 100]}\n"
+            if current and len(current) + len(block) > max_chars:
+                parts.append(current)
+                current = ""
+            current += block
+    if current:
+        parts.append(current)
+    return parts
 
 
 def chunk_text(text: str, chunk_words: int = CHUNK_WORDS, overlap: int = CHUNK_OVERLAP_WORDS) -> list[str]:

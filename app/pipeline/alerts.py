@@ -1,19 +1,13 @@
-"""Triggered alerts: unusual EOD price/volume moves, plus material
-announcement categories, surfaced separately from the routine digest."""
+"""Triggered alerts for unusual end-of-day price and volume moves."""
 
 import logging
-from datetime import datetime, timedelta, timezone
-
-from app.config import USE_LIVE_NSE, load_portfolio
+from app.config import load_portfolio
 from app.db import get_conn
 from app.sources.yfinance_client import detect_anomaly, refresh_ticker
 from app.sources.yfinance_client import persist_history
 from app.sources.nse_reports import fetch_portfolio_history
 
 logger = logging.getLogger(__name__)
-
-TRIGGER_CATEGORIES = {"results", "M&A", "management_change", "fund_raise", "litigation"}
-
 
 def _tickers() -> list[str]:
     portfolio = load_portfolio()
@@ -82,29 +76,11 @@ def get_price_alerts(volume_multiple: float | None = None, price_move_pct: float
     return alerts
 
 
-def get_category_alerts(window_hours: int = 72) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
-    placeholders = ",".join("?" for _ in TRIGGER_CATEGORIES)
-    with get_conn() as conn:
-        live_only = " AND source != 'seed'" if USE_LIVE_NSE else ""
-        rows = conn.execute(
-            f"""
-            SELECT * FROM announcements
-            WHERE published_at >= ? AND category IN ({placeholders}){live_only}
-            ORDER BY published_at DESC
-            """,
-            (cutoff, *TRIGGER_CATEGORIES),
-        ).fetchall()
-    return [{"kind": "announcement", **dict(r)} for r in rows]
-
-
 def get_all_alerts(
-    window_hours: int = 72,
     volume_multiple: float | None = None,
     price_move_pct: float | None = None,
 ) -> dict:
     return {
         "price_volume": get_price_alerts(volume_multiple, price_move_pct),
-        "announcements": get_category_alerts(window_hours),
         "price_data": get_price_data_status(),
     }

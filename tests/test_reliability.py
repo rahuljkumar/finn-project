@@ -5,6 +5,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from test_support import isolate_background
 
 from fastapi.testclient import TestClient
 
@@ -24,6 +25,7 @@ CSV = b"SYMBOL, SERIES, DATE1, PREV_CLOSE, CLOSE_PRICE, TTL_TRD_QNTY\nAAA, EQ, 2
 
 class ReliabilityTests(unittest.TestCase):
     def setUp(self):
+        isolate_background(self)
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         db_patch = patch("app.db.DB_PATH", str(Path(self.folder.name) / "test.db"))
@@ -195,7 +197,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Refreshing data", response.text)
         self.assertIn('hx-trigger="every 5s"', response.text)
-        self.assertIn('hx-get="/digest?hours=168"', response.text)
+        self.assertIn('hx-get="/digest?hours=168&amp;mode=preset', response.text)
 
     def test_research_cache_survives_restart_and_falls_back_during_outage(self):
         data = {"content": "**Revenue** grew.", "sources": [{"label": "Annual Report", "url": "https://example.com/report.pdf"}]}
@@ -231,10 +233,9 @@ class ReliabilityTests(unittest.TestCase):
                  "Jun 2026": {m: 110 for m in ("revenue", "ebitda", "pbt", "pat")}}
         chunks = [{"label": "Concall Apr 2026", "text": "We guide to 10% growth", "embedding": [1, 0]},
                   {"label": "Concall Jul 2026", "text": "Future unrelated guidance", "embedding": [1, 0]}]
-        with patch.object(pvd, "fetch_soup", return_value=object()), \
-             patch.object(pvd, "get_quarterly_table", return_value=table), \
-             patch.object(pvd, "get_documents", return_value={"concalls": [{"label": "Apr 2026", "transcript_url": "https://example.com/apr.pdf"}]}), \
-             patch.object(pvd, "build_index", return_value=chunks), \
+        with patch.object(pvd, "get_snapshot", return_value={"quarters": table,
+                "documents": {"concalls": [{"label": "Apr 2026", "transcript_url": "https://example.com/apr.pdf"}]}}), \
+             patch.object(pvd, "load_index", return_value=chunks), \
              patch.object(pvd, "embed", return_value=[[1, 0]]), \
              patch.object(pvd, "chat_json", return_value={"verdict": "met", "rationale": "Guided growth delivered"}) as judge:
             result = pvd.build_promised_vs_delivered("AAA", n_quarters=1)

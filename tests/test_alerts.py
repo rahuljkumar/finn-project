@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from test_support import isolate_background
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -19,6 +21,7 @@ PORTFOLIO = {"portfolio": [{"ticker": "AAA"}, {"ticker": "BBB"}], "adhoc": []}
 
 class AlertsTests(unittest.TestCase):
     def setUp(self):
+        isolate_background(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         db_patch = patch("app.db.DB_PATH", str(Path(folder.name) / "alerts.db"))
@@ -72,6 +75,23 @@ class AlertsTests(unittest.TestCase):
         self.assertIn("No matching alerts at these thresholds", response.text)
         self.assertIn("Price data: 1 of 2 stocks", response.text)
         self.assertNotIn("No price data loaded", response.text)
+
+    def test_recent_material_filing_stays_in_digest_and_does_not_override_empty_price_alerts(self):
+        self.add_price("AAA", change=0.1)
+        headline = "AAA announced a new fundraising round"
+        with get_conn() as conn:
+            conn.execute("""INSERT INTO announcements
+                (id,ticker,company,exchange,published_at,headline,category,priority,attachment_url,source)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                ("recent-fundraise", "AAA", "Alpha Limited", "NSE",
+                 (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+                 headline, "fund_raise", "high", "https://example.com/filing.pdf", "nse_live"))
+        alerts = self.client.get("/alerts?vol_mult=2&price_pct=5")
+        self.assertIn("No matching alerts at these thresholds", alerts.text)
+        self.assertNotIn(headline, alerts.text)
+        digest = self.client.get("/digest?hours=24&mode=custom")
+        self.assertEqual(digest.status_code, 200)
+        self.assertIn(headline, digest.text)
 
     def test_price_move_is_checked_without_a_volume_average(self):
         self.add_price("AAA", volume=None, average=None, change=-0.5)

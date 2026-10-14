@@ -7,15 +7,20 @@ from the company's own filings.
 
 import json
 import logging
-import time
+import hashlib
+import re
+import threading
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
-from app.config import DATA_DIR
+from app.config import DATA_DIR, EMBEDDING_MODEL, load_portfolio
+from app.db import get_conn
 from app.llm.client import chat_text, embed
-from app.pipeline.documents import chunk_text, fetch_and_extract
-from app.sources.screener_client import get_documents, fetch_soup
+from app.pipeline.documents import document_chunks, download_pdf, fetch_document
+from app.sources.screener_client import get_documents, fetch_soup, get_annual_table, get_quarterly_table
 from app.storage import atomic_write
 
 logger = logging.getLogger(__name__)
@@ -84,82 +89,240 @@ def _document_sources(docs: dict) -> list[dict]:
     return sources
 
 
-def build_index(ticker: str, force: bool = False) -> list[dict]:
-    path = _index_path(ticker)
-    if path.exists() and not force:
+def _report_in_window(source: dict, since: date, as_of: date) -> bool | None:
+    if source["doc_type"] == "annual_report":
+        year = int(source["label"].rsplit(" ", 1)[1])
+        return since.year < year <= as_of.year
+    label = source["label"].removeprefix("Concall ").strip()
+    for pattern in ("%d %b %Y", "%d %B %Y", "%b %Y", "%B %Y"):
         try:
-            with open(path, encoding="utf-8") as f:
-                chunks = json.load(f)
-        except (ValueError, OSError):
-            logger.warning("Rebuilding unreadable index for %s", ticker)
-            return build_index(ticker, force=True)
-        # Older indexes kept labels but dropped URLs. Add the document metadata
-        # without downloading PDFs again or replacing existing embeddings.
-        if any(not c.get("url") for c in chunks):
-            soup = fetch_soup(ticker)
-            if soup is not None:
-                urls = {s["label"]: s["url"] for s in _document_sources(get_documents(soup))}
-                changed = False
-                for chunk in chunks:
-                    if not chunk.get("url") and urls.get(chunk["label"]):
-                        chunk["url"] = urls[chunk["label"]]
-                        changed = True
-                if changed:
-                    atomic_write(path, json.dumps(chunks).encode("utf-8"))
-        # Recheck document links daily, while preserving the existing index
-        # if Screener is temporarily unavailable.
-        if time.time() - path.stat().st_mtime >= 86400:
-            soup = fetch_soup(ticker)
-            if soup is not None:
-                available = _document_sources(get_documents(soup))
-                wanted = ([s for s in available if s["doc_type"] == "annual_report"][:MAX_ANNUAL_REPORTS]
-                          + [s for s in available if s["doc_type"] == "concall"][:MAX_CONCALLS])
-                current = {(c["label"], c.get("url")) for c in chunks}
-                if {(s["label"], s["url"]) for s in wanted} != current:
-                    return build_index(ticker, force=True) or chunks
-                path.touch()
-        return chunks
+            # Month-only labels use their first day; never assume a later
+            # publication date to bring a report inside the selected window.
+            period = datetime.strptime(label, pattern).date()
+            return since <= period <= as_of
+        except ValueError:
+            continue
+    return None
 
+
+def load_index(ticker: str) -> list[dict]:
+    path = _index_path(ticker)
+    if not path.exists():
+        return []
+    try:
+        chunks = json.loads(path.read_text(encoding="utf-8"))
+        return chunks if isinstance(chunks, list) else []
+    except (OSError, ValueError):
+        logger.warning("Unreadable stored index for %s; run document sync to repair it", ticker)
+        return []
+
+
+def get_snapshot(ticker: str) -> dict:
+    with get_conn() as conn:
+        row = conn.execute("SELECT payload FROM research_snapshots WHERE ticker=?", (ticker,)).fetchone()
+    return json.loads(row[0]) if row else {}
+
+
+def corpus_revision(ticker: str) -> str:
+    path = _index_path(ticker)
+    stamp = f"{path.stat().st_mtime_ns}:{path.stat().st_size}" if path.exists() else "empty"
+    with get_conn() as conn:
+        row = conn.execute("SELECT revision FROM research_snapshots WHERE ticker=?", (ticker,)).fetchone()
+    return hashlib.sha256(f"{stamp}:{row[0] if row else ''}".encode()).hexdigest()[:20]
+
+
+def document_status(ticker: str) -> dict:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT label,status,checked_at FROM research_documents WHERE ticker=?", (ticker,)).fetchall()
+        snapshot = conn.execute("SELECT saved_at FROM research_snapshots WHERE ticker=?", (ticker,)).fetchone()
+    return {"ready": bool(load_index(ticker)), "labels": sorted({r["label"] for r in rows if r["status"] == "indexed"}),
+            "failed": sum(r["status"] == "error" for r in rows),
+            "checked_at": snapshot[0] if snapshot else None}
+
+
+def _record_document(ticker, source, content_hash, status):
+    with get_conn() as conn:
+        conn.execute("""INSERT INTO research_documents VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(ticker,url) DO UPDATE SET label=excluded.label,doc_type=excluded.doc_type,
+            content_hash=excluded.content_hash,status=excluded.status,checked_at=excluded.checked_at""",
+            (ticker, source["url"], source["label"], source["doc_type"], content_hash, status,
+             datetime.now(timezone.utc).isoformat()))
+
+
+_sync_guard = threading.Lock()
+_sync_locks = {}
+
+
+def sync_ticker(ticker: str, force: bool = False, *, all_reports: bool = False,
+                progress: Callable[[dict], None] | None = None,
+                since: date | None = None, as_of: date | None = None) -> dict:
+    """Sync recent reports, or the entire discovered archive for a backfill.
+
+    Full backfills also ensure the PDFs behind reused vectors are on disk.
+    Optional dates restrict downloads to the selected reporting window.
+    A progress callback receives one terminal event per report.
+    """
+    ticker = ticker.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9&\-]{1,20}", ticker):
+        raise ValueError("Invalid ticker")
+    with _sync_guard:
+        lock = _sync_locks.setdefault(ticker, threading.Lock())
+    with lock:
+        return _sync_ticker(ticker, force, all_reports=all_reports, progress=progress, since=since, as_of=as_of)
+
+
+def _sync_ticker(ticker: str, force: bool, *, all_reports: bool = False,
+                 progress: Callable[[dict], None] | None = None,
+                 since: date | None = None, as_of: date | None = None) -> dict:
     soup = fetch_soup(ticker)
     if soup is None:
-        return []
+        raise RuntimeError("Screener company page is unavailable")
     docs = get_documents(soup)
-
+    snapshot = {"profit_loss": get_annual_table(soup, "profit-loss"),
+                "balance_sheet": get_annual_table(soup, "balance-sheet"),
+                "cash_flow": get_annual_table(soup, "cash-flow"),
+                "ratios": get_annual_table(soup, "ratios"),
+                "quarters": get_quarterly_table(soup), "documents": docs,
+                "source_url": f"https://www.screener.in/company/{ticker}/consolidated/"}
+    payload = json.dumps(snapshot, sort_keys=True)
+    with get_conn() as conn:
+        conn.execute("""INSERT INTO research_snapshots VALUES (?,?,?,?)
+            ON CONFLICT(ticker) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,saved_at=excluded.saved_at""",
+            (ticker, payload, hashlib.sha256(payload.encode()).hexdigest(), datetime.now(timezone.utc).isoformat()))
+        known = {r["url"]: dict(r) for r in conn.execute(
+            "SELECT * FROM research_documents WHERE ticker=?", (ticker,)).fetchall()}
     available = _document_sources(docs)
-    sources = (
-        [s for s in available if s["doc_type"] == "annual_report"][:MAX_ANNUAL_REPORTS]
-        + [s for s in available if s["doc_type"] == "concall"][:MAX_CONCALLS]
-    )
+    eligible, undated, skipped = available, [], 0
+    if since:
+        eligible = []
+        end = as_of or datetime.now(timezone.utc).date()
+        for source in available:
+            in_window = _report_in_window(source, since, end)
+            if in_window is None:
+                undated.append(source)
+            elif in_window:
+                eligible.append(source)
+            else:
+                skipped += 1
+    selected = eligible if all_reports else (
+        [s for s in eligible if s["doc_type"] == "annual_report"][:MAX_ANNUAL_REPORTS]
+        + [s for s in eligible if s["doc_type"] == "concall"][:MAX_CONCALLS])
+    unique_sources = {}
+    for source in selected:
+        unique_sources.setdefault(source["url"], source)
+    wanted = list(unique_sources.values())
+    chunks = load_index(ticker)
+    # Import the earlier index without paying for its embeddings again.
+    by_label = {s["label"]: s for s in available}
+    changed = False
+    for chunk in chunks:
+        source = by_label.get(chunk.get("label"))
+        if source and not chunk.get("url"):
+            chunk.update(url=source["url"], doc_type=source["doc_type"])
+            changed = True
+    summary = {"ticker": ticker, "checked": len(wanted), "new": 0, "indexed": 0,
+               "unchanged": 0, "chunks_added": 0, "skipped_outside_window": skipped,
+               "undated": undated, "failed": [f"Date unavailable: {s['label']}" for s in undated]}
+    for position, source in enumerate(wanted, start=1):
+        event = {"ticker": ticker, **source, "position": position, "total": len(wanted)}
+        current = [c for c in chunks if c.get("url") == source["url"]]
+        record = known.get(source["url"], {})
+        compatible = current and all(c.get("embedding_model", EMBEDDING_MODEL) == EMBEDDING_MODEL for c in current)
+        alias = record.get("status") == "indexed" and any(
+            c.get("content_hash") and c["content_hash"] == record.get("content_hash")
+            and c.get("embedding_model", EMBEDDING_MODEL) == EMBEDDING_MODEL for c in chunks)
+        if not record and not current:
+            summary["new"] += 1
+        try:
+            if not force and (compatible or alias):
+                if all_reports and download_pdf(source["url"]) is None:
+                    raise ValueError("Previously indexed PDF could not be downloaded")
+                summary["unchanged"] += 1
+                _record_document(ticker, source, record.get("content_hash") or (current[0].get("content_hash") if current else None), "indexed")
+                event.update(status="unchanged", chunks_added=0)
+            else:
+                document = fetch_document(source["url"])
+                if not document:
+                    raise ValueError("No readable PDF text")
+                duplicate = [c for c in chunks if c.get("content_hash") == document["content_hash"]
+                             and c.get("embedding_model") == EMBEDDING_MODEL]
+                if duplicate and not force:
+                    summary["unchanged"] += 1
+                    _record_document(ticker, source, document["content_hash"], "indexed")
+                    event.update(status="unchanged", chunks_added=0)
+                else:
+                    added = [{**source, **c, "content_hash": document["content_hash"],
+                              "embedding_model": EMBEDDING_MODEL} for c in document_chunks(document)]
+                    if not added:
+                        raise ValueError("No chunks extracted")
+                    vectors = embed([c["text"] for c in added])
+                    for chunk, vector in zip(added, vectors, strict=True):
+                        chunk["embedding"] = vector
+                    updated = [c for c in chunks if c.get("url") != source["url"]] + added
+                    atomic_write(_index_path(ticker), json.dumps(updated).encode("utf-8"))
+                    chunks = updated
+                    changed = False
+                    _record_document(ticker, source, document["content_hash"], "indexed")
+                    summary["indexed"] += 1
+                    summary["chunks_added"] += len(added)
+                    event.update(status="indexed", chunks_added=len(added))
+        except Exception:
+            logger.exception("Could not index %s / %s", ticker, source["label"])
+            _record_document(ticker, source, record.get("content_hash"), "error")
+            summary["failed"].append(source["label"])
+            event.update(status="failed", chunks_added=0, error="Could not download, read, or embed this report.")
+        if progress:
+            progress(event)
+    if changed:
+        atomic_write(_index_path(ticker), json.dumps(chunks).encode("utf-8"))
+    return summary
 
-    chunks = []
-    for src in sources:
-        text = fetch_and_extract(src["url"])
-        if not text:
-            continue
-        for i, chunk in enumerate(chunk_text(text)):
-            chunks.append({"doc_type": src["doc_type"], "label": src["label"], "url": src["url"], "chunk_index": i, "text": chunk})
 
-    if not chunks:
-        return []
+def sync_portfolio(tickers: list[str] | None = None) -> dict:
+    if tickers is None:
+        portfolio = load_portfolio()
+        tickers = [c["ticker"] for c in portfolio["portfolio"] + portfolio["adhoc"]]
+    results, failed = [], []
+    for ticker in dict.fromkeys(tickers):
+        try:
+            result = sync_ticker(ticker)
+            results.append(result)
+            if result["failed"]:
+                failed.append(ticker)
+        except Exception:
+            logger.exception("Document sync failed for %s", ticker)
+            failed.append(ticker)
+    return {"total": len(set(tickers)), "checked": sum(r["checked"] for r in results),
+            "new": sum(r["new"] for r in results), "indexed": sum(r["indexed"] for r in results),
+            "unchanged": sum(r["unchanged"] for r in results), "failed": failed}
 
-    embeddings = embed([c["text"] for c in chunks])
-    for c, e in zip(chunks, embeddings):
-        c["embedding"] = e
 
-    INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(chunks).encode("utf-8"))
-    return chunks
+def build_index(ticker: str, force: bool = False) -> list[dict]:
+    """Explicit ingestion entry point; retrieval never calls this."""
+    sync_ticker(ticker, force)
+    return load_index(ticker)
 
 
 def retrieve(ticker: str, query: str, k: int = 8) -> list[dict]:
-    chunks = build_index(ticker)
+    chunks = load_index(ticker)
     if not chunks:
         return []
     q_emb = np.array(embed([query])[0])
     mat = np.array([c["embedding"] for c in chunks])
     norms = np.linalg.norm(mat, axis=1) * np.linalg.norm(q_emb) + 1e-8
     sims = (mat @ q_emb) / norms
-    top_idx = np.argsort(-sims)[:k]
+    # Exact words/names complement semantic retrieval; diversify the sources.
+    words = set(re.findall(r"[a-z0-9]+", query.lower()))
+    lexical = np.array([len(words & set(re.findall(r"[a-z0-9]+", c["text"].lower()))) / max(len(words), 1) for c in chunks])
+    order = np.argsort(-(sims + 0.15 * lexical))
+    top_idx, counts = [], {}
+    for i in order:
+        label = chunks[i]["label"]
+        if counts.get(label, 0) < 3:
+            top_idx.append(i)
+            counts[label] = counts.get(label, 0) + 1
+        if len(top_idx) == k:
+            break
     return [chunks[i] for i in top_idx]
 
 
@@ -187,4 +350,6 @@ def generate_section(ticker: str, category: str, structured: dict | None = None)
 
     source_urls = {c["label"]: c.get("url") for c in chunks}
     sources = [{"label": label, "url": source_urls[label]} for label in sorted(source_urls)]
+    if structured:
+        sources.append({"label": "Financial tables via Screener", "url": get_snapshot(ticker).get("source_url")})
     return {"content": content, "sources": sources}

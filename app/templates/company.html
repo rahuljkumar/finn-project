@@ -7,6 +7,8 @@
     {% if company_name %}<p class="text-xs text-slate-500 dark:text-slate-400">{{ company_name }}</p>{% endif %}
   </div>
 
+  {% include "partials/research_documents.html" %}
+
   <button
     @click="open = open === 'pvd' ? null : 'pvd'"
     hx-get="/research/{{ ticker }}/section/promised_vs_delivered"
@@ -51,5 +53,26 @@
     <div id="section-{{ key }}" class="research-result"></div>
   </div>
   {% endfor %}
+
+  <section id="research-chat" data-ticker="{{ ticker }}" class="rounded-xl border border-blue-200 dark:border-blue-900 bg-white dark:bg-slate-900 p-4 mt-3">
+    <h2 class="font-semibold text-sm">Ask about {{ ticker }}</h2>
+    <p class="text-xs text-slate-500 mt-1">Ask about the reports or any research topic. Answers include supporting sources.</p>
+    <div class="flex flex-wrap gap-2 mt-3">
+      {% for question in ['What are the main growth drivers?', 'Has cash generation kept up with profit?', 'What has management guided on?', 'Did management deliver on its previous guidance?'] %}
+      <button type="button" class="chat-starter rounded-full border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs">{{ question }}</button>
+      {% endfor %}
+    </div>
+    <div id="chat-messages" class="flex flex-col gap-3 mt-4" aria-live="polite"></div>
+    <form id="chat-form" class="flex flex-col gap-2 mt-3">
+      <label for="chat-question" class="sr-only">Your research question</label>
+      <textarea id="chat-question" required maxlength="2000" rows="2" placeholder="Ask a question or follow up&hellip;"
+                class="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent p-2 text-sm"></textarea>
+      <div class="flex items-center justify-between">
+        <button id="chat-clear" type="button" class="text-xs text-slate-500 underline">New conversation</button>
+        <button id="chat-submit" type="submit" class="rounded-lg bg-blue-600 text-white px-4 py-2 text-xs disabled:opacity-50">Ask</button>
+      </div>
+    </form>
+  </section>
 </div>
+<script src="/static/research-chat.js" defer></script>
 {% endblock %}

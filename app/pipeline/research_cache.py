@@ -24,7 +24,8 @@ def _saved(key):
 
 
 def cached_research(ticker, category, generate):
-    key = f"v1:{REASONING_MODEL}:{ticker}:{category}"
+    from app.pipeline.pull_pipeline import corpus_revision
+    key = f"v2:{REASONING_MODEL}:{ticker}:{category}:{corpus_revision(ticker)}"
     saved = _saved(key)
     if saved and datetime.now(timezone.utc) - datetime.fromisoformat(saved["saved_at"]) < FRESH_FOR:
         return saved

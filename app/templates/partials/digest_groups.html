@@ -1,0 +1,24 @@
+<div id="digest-groups" class="flex flex-col gap-3">
+  {% for group in groups %}
+  <article class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div><h2 class="font-medium text-sm">{{ group.company }}</h2><p class="text-xs text-slate-400">{{ group.ticker }}</p></div>
+      <div class="text-xs text-right">
+        {% if group.high_count %}<div class="text-red-600 dark:text-red-400">{{ group.high_count }} priority</div>{% endif %}
+        {% if group.medium_count %}<div class="text-amber-600 dark:text-amber-400">{{ group.medium_count }} notable</div>{% endif %}
+      </div>
+    </div>
+    {% if group.job %}{% with job=group.job %}{% include "partials/ai_job.html" %}{% endwith %}
+    {% else %}<p class="text-xs text-slate-500 mt-3">Generate an AI summary for this selection.</p>{% endif %}
+    {% if group.job %}
+    <button hx-post="/digest/summaries" hx-include="#digest-summary-form" hx-target="#digest-groups" hx-swap="outerHTML" hx-disabled-elt="this"
+            class="text-xs text-blue-600 underline mt-2">Retry summaries</button>
+    {% endif %}
+    <details class="mt-3 text-xs"><summary class="cursor-pointer text-slate-500">Supporting filings ({{ group['items']|length }})</summary>
+      <div class="flex flex-col gap-2 mt-2">
+        {% for item in group['items'] %}{% include "partials/announcement_card.html" %}{% endfor %}
+      </div>
+    </details>
+  </article>
+  {% endfor %}
+</div>

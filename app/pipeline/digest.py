@@ -145,20 +145,21 @@ def refresh_all(tickers: list[str] | None = None) -> int:
     return count
 
 
-def get_digest(window_hours: int = 24) -> dict:
+def get_digest(window_hours: int = 24, ticker: str = "", query: str = "") -> dict:
     """Announcements within the window, grouped by priority. `routine`
     (low priority + unclassified) is returned separately so the UI can
     collapse it by default."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=window_hours)).isoformat()
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT * FROM announcements
-            WHERE published_at >= ? OR
-                  (source = 'web_search' AND julianday(published_at, '+1 day') > julianday(?))
+            WHERE julianday(published_at) <= julianday(?) AND (published_at >= ? OR
+                  (source = 'web_search' AND julianday(published_at, '+1 day') > julianday(?)))
             ORDER BY priority = 'high' DESC, priority = 'medium' DESC, published_at DESC
             """,
-            (cutoff, cutoff),
+            (now.isoformat(), cutoff, cutoff),
         ).fetchall()
         latest = conn.execute("SELECT MAX(published_at) FROM announcements WHERE source != 'seed'").fetchone()[0]
         has_history = conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_backfill'").fetchone() is not None
@@ -169,6 +170,10 @@ def get_digest(window_hours: int = 24) -> dict:
         d["search_metadata"] = json.loads(d["raw_json"]) if d["source"] == "web_search" and d["raw_json"] else {}
         if USE_LIVE_NSE and d["source"] == "seed":
             continue
+        if ticker and d["ticker"] != ticker:
+            continue
+        if query and query.casefold() not in " ".join(str(d.get(k) or "") for k in ("headline", "company", "ticker", "category")).casefold():
+            continue
         if d["priority"] == "high":
             high.append(d)
         elif d["priority"] == "medium":
@@ -176,6 +181,6 @@ def get_digest(window_hours: int = 24) -> dict:
         else:
             routine.append(d)
 
-    return {"high": high, "medium": medium, "routine": routine, "window_hours": window_hours,
+    return {"high": high, "medium": medium, "routine": routine, "window_hours": window_hours, "as_of": now.isoformat(),
             "latest_filing": latest, "has_history": has_history, "live_mode": USE_LIVE_NSE,
             "filing_search": search_status()}

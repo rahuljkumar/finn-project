@@ -6,7 +6,7 @@
 <div class="flex flex-col gap-4">
   <div>
     <h1 class="text-xl font-semibold tracking-tight">Alerts</h1>
-    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Unusual price/volume moves and material announcements across your portfolio.</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Unusual price/volume moves across your portfolio, with sourced explanations for qualifying moves.</p>
   </div>
 
   <form action="/alerts" method="get" class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex flex-col gap-2">
@@ -27,6 +27,9 @@
       <button type="submit" class="self-start text-blue-600 dark:text-blue-400 underline">Apply</button>
     </div>
   </form>
+
+  {% if not news_enabled %}<p class="text-xs text-slate-500">News search is off: both filters must be at least 2&times; volume and 5% price. Matching stocks still appear below.</p>
+  {% else %}<p class="text-xs text-slate-500">Qualifying moves include sourced news explanations where available.</p>{% endif %}
 
   {% include "partials/feed_status.html" %}
   {% if refresh_summary and not feed.running %}
@@ -53,7 +56,7 @@
     {% if price_data.oldest_date and price_data.oldest_date != price_data.latest_date %}<div class="text-amber-600">Some stocks have older prices, from {{ price_data.oldest_date }}. Check the date on each alert.</div>{% endif %}
     {% if price_data.available < price_data.total %}<div>Some stocks have no usable price data and could not be checked.</div>{% endif %}
   </div>
-  {% if not price_volume and not announcements %}
+  {% if not price_volume %}
   <div class="text-sm text-slate-500 dark:text-slate-400 mt-2">No matching alerts at these thresholds.</div>
   {% endif %}
   {% endif %}
@@ -74,21 +77,17 @@
           {% for r in a.reasons %}<div>{{ r }}</div>{% endfor %}
         </div>
         <div class="text-xs text-slate-400 mt-1">{{ a.date }} &middot; close &#8377;{{ a.close }}</div>
+        {% if a.job %}
+        <div id="news-{{ a.ticker }}">{% with job=a.job %}{% include "partials/ai_job.html" %}{% endwith %}</div>
+        <button hx-post="/alerts/{{ a.ticker|urlencode }}/explanation?vol_mult={{ vol_mult }}&price_pct={{ price_pct }}"
+                hx-target="#news-{{ a.ticker }}" hx-swap="innerHTML" hx-disabled-elt="this"
+                class="text-xs text-blue-600 underline mt-2">Retry news search</button>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
   </div>
   {% endif %}
 
-  {% if announcements %}
-  <div>
-    <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2 mt-2">Material announcements ({{ announcements|length }})</div>
-    <div class="flex flex-col gap-2">
-      {% for item in announcements %}
-      {% include "partials/announcement_card.html" %}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 </div>
 {% endblock %}

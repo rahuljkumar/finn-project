@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block header_right %}
-<a href="/digest?hours={{ window_hours }}&refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
+<a href="/digest?{{ filter_params }}&refresh=true" class="text-blue-600 dark:text-blue-400">Refresh</a>
 {% endblock %}
 {% block content %}
 <div x-data="{ showRoutine: false }" class="flex flex-col gap-4">
@@ -9,19 +9,32 @@
     <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
       <div class="flex shrink-0 gap-2">
         {% for h, label in [(24, '24h'), (168, '7d'), (720, '30d')] %}
-        <a href="/digest?hours={{ h }}"
-           class="px-3 py-1 rounded-full border {{ 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900' if window_hours == h else 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300' }}">
+        <a href="/digest?hours={{ h }}&mode=preset"
+           class="px-3 py-1 rounded-full border {{ 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900' if automatic and window_hours == h else 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300' }}">
           {{ label }}
         </a>
         {% endfor %}
       </div>
       <form action="/digest" method="get" class="flex items-center gap-2">
+        <input type="hidden" name="mode" value="custom" />
         <input id="digest-hours" type="number" name="hours" min="1" max="8760" value="{{ window_hours }}" required
                class="w-20 rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-sm" />
         <label for="digest-hours" class="text-slate-500 dark:text-slate-400">hours</label>
         <button type="submit" class="text-slate-500 dark:text-slate-400 underline">Go</button>
       </form>
     </div>
+    <form action="/digest" method="get" class="flex flex-wrap items-center gap-2 mt-3 text-xs">
+      <input type="hidden" name="mode" value="custom" /><input type="hidden" name="hours" value="{{ window_hours }}" />
+      <label for="digest-ticker" class="sr-only">Filter company</label>
+      <select id="digest-ticker" name="ticker" class="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-2">
+        <option value="">All companies</option>
+        {% for company in companies %}<option value="{{ company.ticker }}" {% if company.ticker == filter_ticker %}selected{% endif %}>{{ company.ticker }}</option>{% endfor %}
+      </select>
+      <label for="digest-query" class="sr-only">Filter disclosure text</label>
+      <input id="digest-query" name="q" value="{{ filter_query }}" maxlength="200" placeholder="Filter disclosures&hellip;"
+             class="min-w-0 flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent p-2" />
+      <button class="text-blue-600 dark:text-blue-400 underline">Apply</button>
+    </form>
   </div>
 
   {% include "partials/feed_status.html" %}
@@ -46,27 +59,16 @@
   </div>
   {% endif %}
 
-  {% if high %}
-  <div>
-    <div class="text-xs font-medium uppercase tracking-wide text-red-600 dark:text-red-400 mb-2">Priority ({{ high|length }})</div>
-    <div class="flex flex-col gap-2">
-      {% for item in high %}
-      {% include "partials/announcement_card.html" %}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {% if medium %}
-  <div>
-    <div class="text-xs font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400 mb-2 mt-2">Notable ({{ medium|length }})</div>
-    <div class="flex flex-col gap-2">
-      {% for item in medium %}
-      {% include "partials/announcement_card.html" %}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+  <form id="digest-summary-form" hx-post="/digest/summaries" hx-target="#digest-groups" hx-swap="outerHTML" hx-disabled-elt="find button">
+    <input type="hidden" name="hours" value="{{ window_hours }}" /><input type="hidden" name="mode" value="{{ mode }}" />
+    <input type="hidden" name="ticker" value="{{ filter_ticker }}" /><input type="hidden" name="q" value="{{ filter_query }}" />
+    {% if groups %}
+      <div class="text-xs text-slate-500">{{ high|length }} priority · {{ medium|length }} notable · {{ groups|length }} companies</div>
+      {% if automatic %}<p class="text-xs text-slate-500 mt-1">AI summaries are prepared automatically for this preset.</p>
+      {% else %}<button class="rounded-lg bg-blue-600 text-white px-3 py-2 text-xs mt-2">Generate AI summary</button>{% endif %}
+    {% endif %}
+  </form>
+  {% include "partials/digest_groups.html" %}
 
   {% if routine %}
   <div class="mt-2">
