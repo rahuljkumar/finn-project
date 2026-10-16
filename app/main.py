@@ -82,13 +82,16 @@ def digest(request: Request, hours: int = Query(default=24, ge=1, le=8760), refr
     if refresh:
         request_refresh("filings", force=True)
     ticker, q = ticker.strip().upper(), q.strip()
+    # Read running state before the data snapshot. If a worker finishes
+    # between them, the extra poll renders its final committed results.
+    feed = feed_status("filings")
     data = get_digest(window_hours=hours, ticker=ticker, query=q)
     groups = summary_groups(data, mode=mode, ticker=ticker, query=q)
     params = urlencode({"hours": hours, "mode": mode, "ticker": ticker, "q": q})
     return templates.TemplateResponse(
         request,
         "digest.html",
-        {"title": "FINN · Digest", "active": "digest", "feed": feed_status("filings"),
+        {"title": "FINN · Digest", "active": "digest", "feed": feed,
          "poll_url": f"/digest?{params}", "filter_params": params, "mode": mode,
          "filter_ticker": ticker, "filter_query": q, "companies": all_portfolio_companies(),
          "groups": groups, "automatic": mode == "preset" and hours in PRESETS and not ticker and not q, **data},

@@ -3,17 +3,20 @@
 import hashlib
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 
 from app.config import CATEGORY_PRIORITY, USE_LIVE_NSE, load_portfolio
 from app.db import get_conn
-from app.pipeline.classify import classify_batch
+from app.pipeline.classify import classify_batch, rule_classify
 from app.sources.nse_client import fetch_announcements
 from app.sources.nse_rss import fetch_recent_announcements
 from app.sources.filing_search import canonical_url, fetch_search_announcements, search_status, set_fallback_active
 from app.sources.seed_data import load_seed_announcements
 
 logger = logging.getLogger(__name__)
+_ingest_guard = threading.Lock()
 
 NSE_DT_FORMAT = "%d-%b-%Y %H:%M:%S"
 
@@ -32,37 +35,27 @@ def _company_lookup() -> dict[str, str]:
 
 
 def refresh_all(tickers: list[str] | None = None) -> int:
-    """Fetch, classify, and persist announcements for the given tickers
-    (defaults to the whole portfolio + ad-hoc list). Returns count persisted."""
+    """Save recent filings immediately; maintenance runs in separate jobs."""
     portfolio = load_portfolio()
     tickers = tickers or [c["ticker"] for c in portfolio["portfolio"] + portfolio["adhoc"]]
-    names = _company_lookup()
-
     all_items: list[tuple[str, str, dict]] = []
-    completed_backfill = False
     if USE_LIVE_NSE:
         companies = [c for c in portfolio["portfolio"] + portfolio["adhoc"] if c["ticker"] in tickers]
+        started = perf_counter()
         try:
             recent = fetch_recent_announcements(companies)
         except Exception as exc:
             logger.warning("NSE RSS unavailable: %s", exc)
             recent = None
-        with get_conn() as conn:
-            backfilled = conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_backfill'").fetchone()
-            attempt = conn.execute("SELECT attempted_at FROM feed_state WHERE feed = 'filings_backfill'").fetchone()
-            due = not attempt or datetime.now(timezone.utc) - datetime.fromisoformat(attempt[0]) >= timedelta(days=1)
-            if not backfilled and due:
-                conn.execute("""INSERT INTO feed_state (feed, attempted_at) VALUES ('filings_backfill', ?)
-                                ON CONFLICT(feed) DO UPDATE SET attempted_at = excluded.attempted_at""",
-                             (datetime.now(timezone.utc).isoformat(),))
-        # A shared session backfills just the portfolio. Stop on the first
-        # API block rather than retrying blocked sessions for every stock.
+        logger.info("Filings RSS finished in %.2fs (%s items)", perf_counter() - started,
+                    len(recent) if recent is not None else "unavailable")
+        # Only use the short API fallback when RSS is unavailable. The full
+        # 120-day backfill must never hold up a normal recent-feed refresh.
         try:
-            historical = fetch_announcements(tickers, days=120 if not backfilled and due else 2) if (not backfilled and due) or recent is None else []
+            historical = fetch_announcements(tickers, days=2) if recent is None else []
         except Exception:
             logger.warning("NSE historical filings unavailable")
             historical = []
-        completed_backfill = bool(historical) and not backfilled and due
         if recent is None and not historical:
             for item in fetch_search_announcements(companies):
                 all_items.append((item["symbol"], "web_search", item))
@@ -72,14 +65,40 @@ def refresh_all(tickers: list[str] | None = None) -> int:
             for item in items:
                 if item.get("symbol") in tickers:
                     all_items.append((item["symbol"], source, item))
-        # Retry historical backfill daily if it is blocked, while RSS keeps
-        # supplying recent filings. Do not silently load sample announcements.
     else:
         for ticker in tickers:
             all_items.extend((ticker, "seed", item) for item in load_seed_announcements(ticker))
 
-    prepared = {}
+    return _persist_announcements(all_items)
+
+
+def backfill_filings() -> int:
+    """Load historical coverage independently of recent-feed refreshes."""
+    if not USE_LIVE_NSE:
+        return 0
     with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM migrations WHERE name='nse_backfill'").fetchone():
+            return 0
+    tickers = list(_company_lookup())
+    historical = fetch_announcements(tickers, days=120)
+    if not historical:
+        raise RuntimeError("Historical filings are unavailable; recent filings are retained")
+    count = _persist_announcements([(item["symbol"], "nse_live", item)
+                                    for item in historical if item.get("symbol") in tickers])
+    with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO migrations VALUES ('nse_backfill')")
+    return count
+
+
+def _persist_announcements(all_items: list[tuple[str, str, dict]]) -> int:
+    """Commit rule categories and explicit pending inputs without model calls.
+
+    Recent ingestion and historical backfill can overlap. Keep deduplication
+    and insertion together, with no network work inside this short lock.
+    """
+    names = _company_lookup()
+    count = 0
+    with _ingest_guard, get_conn() as conn:
         for ticker, source, item in all_items:
             published = _parse_nse_dt(item.get("an_dt", "")) or item.get("sort_date")
             if not published:
@@ -93,56 +112,57 @@ def refresh_all(tickers: list[str] | None = None) -> int:
                    AND (published_at = ? OR source = 'web_search' OR ? = 'web_search') LIMIT 1""",
                 (ticker, item.get("attchmntFile"), published, source),
             ).fetchone() if item.get("attchmntFile") else None
-            # Prefer the exchange's precise timestamp and text when it recovers.
-            # A date-only search result must not duplicate or replace that filing.
+            ann_id = existing["id"] if existing else f"{ticker}:{key}"
+            category = rule_classify(item)
+            pending = json.dumps({"seq_id": ann_id, "desc": item.get("desc", ""),
+                                  "attchmntText": item.get("attchmntText", "")}) if category is None else None
+            category = category or "unclassified"
+            priority = CATEGORY_PRIORITY.get(category, "low")
+            # Exchange recovery replaces approximate search metadata and
+            # categorizes the authoritative description without duplicating it.
             if existing and existing["source"] == "web_search" and source != "web_search":
                 conn.execute("""UPDATE announcements SET published_at=?, headline=?, source=?,
-                                exchange='NSE', raw_json=NULL WHERE id=?""",
-                             (published, item.get("attchmntText") or item.get("desc"), source, existing["id"]))
-            ann_id = existing["id"] if existing else f"{ticker}:{key}"
+                                exchange='NSE', raw_json=NULL, category=?, priority=?, classification_input=? WHERE id=?""",
+                             (published, item.get("attchmntText") or item.get("desc"), source,
+                              category, priority, pending, ann_id))
             if conn.execute("SELECT 1 FROM announcements WHERE id = ?", (ann_id,)).fetchone():
                 continue
-            item = {**item, "seq_id": ann_id}
-            prepared[ann_id] = (ticker, source, item, published)
-    categories = {}
-    items = [p[2] for p in prepared.values()]
-    for offset in range(0, len(items), 40):
-        categories.update(classify_batch(items[offset:offset + 40]))
-
-    count = 0
-    with get_conn() as conn:
-        for ann_id, (ticker, source, item, published_at) in prepared.items():
-            category = categories.get(ann_id, "unclassified")
-            priority = CATEGORY_PRIORITY.get(category, "low")
             conn.execute(
-                """
-                INSERT INTO announcements
+                """INSERT INTO announcements
                     (id, ticker, company, exchange, published_at, headline, category,
-                     priority, attachment_url, source, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    category=excluded.category,
-                    priority=excluded.priority,
-                    published_at=excluded.published_at
-                """,
-                (
-                    ann_id,
-                    ticker,
-                    names.get(ticker, ticker),
-                    item.get("exchange", "NSE"),
-                    published_at,
-                    item.get("attchmntText") or item.get("desc"),
-                    category,
-                    priority,
-                    item.get("attchmntFile"),
-                    source,
-                    json.dumps(item["search_metadata"]) if item.get("search_metadata") else None,
-                ),
+                     priority, attachment_url, source, raw_json, classification_input)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (ann_id, ticker, names.get(ticker, ticker), item.get("exchange", "NSE"), published,
+                 item.get("attchmntText") or item.get("desc"), category, priority, item.get("attchmntFile"), source,
+                 json.dumps(item["search_metadata"]) if item.get("search_metadata") else None, pending),
             )
             count += 1
-        if completed_backfill:
-            conn.execute("INSERT OR IGNORE INTO migrations VALUES ('nse_backfill')")
     return count
+
+
+def classify_pending_announcements() -> int:
+    """Enrich already-visible filings in bounded batches, newest first.
+
+    Inputs remain in SQLite until their result is committed, so a restart
+    resumes unfinished work. A legitimate unclassified result is terminal.
+    """
+    count = 0
+    while True:
+        with get_conn() as conn:
+            rows = conn.execute("""SELECT id, classification_input FROM announcements
+                WHERE classification_input IS NOT NULL ORDER BY published_at DESC LIMIT 40""").fetchall()
+        if not rows:
+            return count
+        started = perf_counter()
+        categories = classify_batch([json.loads(row["classification_input"]) for row in rows])
+        with get_conn() as conn:
+            for row in rows:
+                category = categories.get(row["id"], "unclassified")
+                updated = conn.execute("""UPDATE announcements SET category=?, priority=?, classification_input=NULL
+                    WHERE id=? AND classification_input=?""",
+                    (category, CATEGORY_PRIORITY.get(category, "low"), row["id"], row["classification_input"]))
+                count += updated.rowcount
+        logger.info("Classified %d saved filings in %.2fs", len(rows), perf_counter() - started)
 
 
 def get_digest(window_hours: int = 24, ticker: str = "", query: str = "") -> dict:
@@ -164,7 +184,7 @@ def get_digest(window_hours: int = 24, ticker: str = "", query: str = "") -> dic
         latest = conn.execute("SELECT MAX(published_at) FROM announcements WHERE source != 'seed'").fetchone()[0]
         has_history = conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_backfill'").fetchone() is not None
 
-    high, medium, routine = [], [], []
+    high, medium, routine, pending = [], [], [], []
     for r in rows:
         d = dict(r)
         d["search_metadata"] = json.loads(d["raw_json"]) if d["source"] == "web_search" and d["raw_json"] else {}
@@ -174,13 +194,15 @@ def get_digest(window_hours: int = 24, ticker: str = "", query: str = "") -> dic
             continue
         if query and query.casefold() not in " ".join(str(d.get(k) or "") for k in ("headline", "company", "ticker", "category")).casefold():
             continue
-        if d["priority"] == "high":
+        if d.pop("classification_input", None) is not None:
+            pending.append(d)
+        elif d["priority"] == "high":
             high.append(d)
         elif d["priority"] == "medium":
             medium.append(d)
         else:
             routine.append(d)
 
-    return {"high": high, "medium": medium, "routine": routine, "window_hours": window_hours, "as_of": now.isoformat(),
+    return {"high": high, "medium": medium, "routine": routine, "pending": pending, "window_hours": window_hours, "as_of": now.isoformat(),
             "latest_filing": latest, "has_history": has_history, "live_mode": USE_LIVE_NSE,
             "filing_search": search_status()}

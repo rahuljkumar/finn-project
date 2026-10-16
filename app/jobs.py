@@ -1,4 +1,4 @@
-"""Small background executor and persisted results for the single-process demo."""
+"""Bounded AI executors and persisted results for the single-process demo."""
 
 import json
 import logging
@@ -11,6 +11,8 @@ from app.db import get_conn
 
 logger = logging.getLogger(__name__)
 _pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="finn-ai")
+# Automatic digest preparation must not queue ahead of an explicit user request.
+_background_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="finn-ai-background")
 _guard = threading.Lock()
 _running: set[str] = set()
 
@@ -44,7 +46,7 @@ def _run(key, work):
 
 
 def start_job(key: str, kind: str, work, *, max_age: int | None = None,
-              retry: bool = False, requires_model: bool = True) -> dict:
+              retry: bool = False, requires_model: bool = True, background: bool = False) -> dict:
     if requires_model and not OPENAI_API_KEY:
         return {"job_key": key, "kind": kind, "state": "disabled", "result": None,
                 "error": "Add your OpenAI API key to enable AI answers."}
@@ -65,5 +67,6 @@ def start_job(key: str, kind: str, work, *, max_age: int | None = None,
                 ON CONFLICT(job_key) DO UPDATE SET state='running', error=NULL, updated_at=excluded.updated_at""",
                          (key, kind, now.isoformat()))
         _running.add(key)
-        _pool.submit(_run, key, work)
+        executor = _background_pool if background else _pool
+        executor.submit(_run, key, work)
     return get_job(key)

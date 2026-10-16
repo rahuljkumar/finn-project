@@ -212,7 +212,8 @@ def summary_groups(data: dict, *, mode="preset", ticker="", query="", generate=F
         if automatic or generate:
             incomplete = saved and (saved.get("result") or {}).get("coverage", {}).get("partial")
             job = start_job(key, "digest", lambda selected=items: generate_summary(selected, retry=retry),
-                            max_age=0 if retry and incomplete else (3600 if incomplete else None), retry=retry)
+                            max_age=0 if retry and incomplete else (3600 if incomplete else None), retry=retry,
+                            background=automatic and not generate)
         groups.append({"ticker": symbol, "company": items[0].get("company") or symbol,
                        "items": items, "high_count": sum(i["priority"] == "high" for i in items),
                        "medium_count": sum(i["priority"] == "medium" for i in items), "job": job})

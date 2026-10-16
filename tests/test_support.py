@@ -11,3 +11,12 @@ def isolate_background(test):
         test_patch = patch(target, side_effect=disabled)
         test_patch.start()
         test.addCleanup(test_patch.stop)
+    # Maintenance is exercised explicitly in its own event-based tests.
+    # Existing HTTP/feed tests must not launch historical downloads or AI.
+    from app import feeds
+    request_refresh = feeds.request_refresh
+    maintenance = patch("app.feeds.request_refresh", side_effect=lambda feed, *args, **kwargs:
+                        False if feed in {"filings_backfill", "filings_classify"}
+                        else request_refresh(feed, *args, **kwargs))
+    maintenance.start()
+    test.addCleanup(maintenance.stop)

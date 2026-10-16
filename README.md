@@ -14,9 +14,15 @@ Single FastAPI service (Python) rendering server-side Jinja2 templates with HTMX
 ```bash
 python -m venv .venv
 .venv/Scripts/activate       # or `source .venv/bin/activate` on macOS/Linux
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env         # PowerShell: Copy-Item .env.example .env
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
+```
+
+If Windows Application Control blocks `uvicorn.exe`, run Uvicorn through the virtual environment's Python interpreter:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 Visit `http://127.0.0.1:8000`.
@@ -79,10 +85,10 @@ The Free plan is useful for trying the app, but does not provide continuous oper
 
 ### Continuous demo on Render
 
-For this single-instance app, choose the $7/month compute service and attach a 1 GB persistent disk (currently $0.25/GB/month). A paid workspace subscription or separate database service is not required. Confirm the current prices on [Render's pricing page](https://render.com/pricing).
+For this single-instance app, start with paid compute providing **1 CPU and 2 GB RAM**, and attach a **5 GB persistent disk** for the two-year research corpus and caches. Monitor memory and disk usage as the corpus grows. A paid workspace subscription or separate database service is not required. Compute, workspace subscriptions, and disks are billed separately; confirm current prices on [Render's pricing page](https://render.com/pricing).
 
-1. In the existing service's **Settings**, select the $7 compute instance.
-2. Open **Disks**, add a disk of **1 GB**, and set its mount path to **`/srv/data`**. Adding a disk triggers a deploy. Only files under that mount path persist; see [Render's disk documentation](https://render.com/docs/disks).
+1. In the existing service's **Compute** page, select the **1 CPU / 2 GB RAM** compute plan.
+2. Open **Disk**, add a disk of **5 GB**, and set its mount path to **`/srv/data`**. Adding a disk triggers a deploy. Only files under that mount path persist; see [Render's disk documentation](https://render.com/docs/disks).
 3. Keep **`DB_PATH=/srv/data/finn.db`**, **`USE_LIVE_NSE=true`**, and **`AUTO_REFRESH=true`** in the service's environment. Keep the existing OpenAI key and model settings. All database, PDF, vector-index and report caches now use the database's parent directory.
 4. Deploy the latest GitHub commit. The first deploy with a new disk starts with an empty database; local laptop data is not copied automatically.
 
@@ -92,6 +98,8 @@ The included `render.yaml` still selects Free for new Blueprint deployments. For
 
 - On startup, background workers begin loading filings and prices and check whether the latest document-sync slot is due. Filings are polled every **5 minutes**, prices every **30 minutes**, and research documents daily at **18:30 IST** while the service is running. `AUTO_REFRESH=false` disables scheduled polling; manual Refresh still works.
 - Refresh returns the page immediately and retains saved results while fetching. The page polls until the job finishes. Repeated clicks reuse the running job and have a 60-second cooldown.
+- Digest saves recent disclosures as soon as its source fetch finishes, applying known categories without model calls. New disclosures that need AI classification appear under **New filings** immediately; their pending inputs survive restarts and provider failures. Classification and historical backfill run independently, so neither holds up a new recent-feed refresh. Digest polls only its results area every two seconds during this work, preserving filter inputs, routine expansion, and open supporting filings. Feed jobs and classification batches log elapsed times for diagnosing cloud delays.
+- Automatic Digest summaries have one dedicated background worker; chat and explicit AI actions retain two separate workers. Duplicate jobs and completed results are still shared across visitors. First-time model answers and upstream source outages can still take time, but cached cards remain available while that work runs.
 - Prices are **end-of-day**, not streaming quotes. The official CSV source loads about 45 calendar days initially, then catches up from saved history. Its reported previous close determines each daily price change; a full 20-session volume average is required for volume alerts. Missing/blocked reports fall back to Yahoo. Both sources can still become unavailable.
 - RSS contains recent announcements, usually a short window. The app retains them over time and attempts a 120-day JSON backfill once a day until it succeeds. The UI labels incomplete historical coverage. A fresh deployment cannot promise a complete 7-day or 30-day digest when historical access is blocked.
 - When both direct filing sources fail, Digest uses OpenAI web search with the **existing `OPENAI_API_KEY`**. It searches the last 30 days on NSE, BSE and reviewed portfolio-company domains, prioritizes the latest 48 hours and 7 days, accepts at most 30 original disclosures with company/date evidence, and saves them in SQLite. Evidence is checked against the actual document, including original PDF links found through investor indexes. If direct access fails, only an explicitly provider-opened document is accepted and labeled accordingly. News stories are excluded by the search instructions; generic investor/quote pages and annual reports are also rejected by URL checks. Search discovery is **incomplete**, and does not satisfy a guarantee of every filing.

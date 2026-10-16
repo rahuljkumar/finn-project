@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS announcements (
     why_it_matters TEXT,
     attachment_url TEXT,
     source TEXT,
-    raw_json TEXT
+    raw_json TEXT,
+    classification_input TEXT
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -101,6 +102,12 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(announcements)")}
+        if "classification_input" not in columns:
+            conn.execute("ALTER TABLE announcements ADD COLUMN classification_input TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS announcements_attachment ON announcements(ticker, attachment_url)")
+        conn.execute("""CREATE INDEX IF NOT EXISTS announcements_pending ON announcements(published_at DESC)
+                        WHERE classification_input IS NOT NULL""")
         # Older builds treated NSE's Indian timestamps as UTC. Correct those
         # stored rows once so identical RSS/API filings also deduplicate.
         if not conn.execute("SELECT 1 FROM migrations WHERE name = 'nse_ist'").fetchone():

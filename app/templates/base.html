@@ -21,7 +21,7 @@
   </header>
 
   <main class="flex-1 px-4 py-4 pb-20 max-w-2xl w-full mx-auto"
-        {% if feed and feed.running %}hx-get="{{ poll_url }}" hx-trigger="every 5s" hx-select="main" hx-target="this" hx-swap="outerHTML"{% endif %}>
+        {% block main_refresh %}{% if feed and feed.polling %}hx-get="{{ poll_url }}" hx-trigger="every 5s" hx-select="main" hx-target="this" hx-swap="outerHTML"{% endif %}{% endblock %}>
     {% block content %}{% endblock %}
   </main>
 

@@ -108,7 +108,7 @@ class ReliabilityTests(unittest.TestCase):
              patch.object(digest, "classify_batch", wraps=digest.classify_batch) as classify:
             self.assertEqual(digest.refresh_all(), 1)
             self.assertEqual(digest.refresh_all(), 0)
-            self.assertEqual(classify.call_count, 1)
+            classify.assert_not_called()
         with get_conn() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0], 1)
 
@@ -196,7 +196,7 @@ class ReliabilityTests(unittest.TestCase):
                 feeds._running.discard("filings")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Refreshing data", response.text)
-        self.assertIn('hx-trigger="every 5s"', response.text)
+        self.assertIn('hx-trigger="every 2s"', response.text)
         self.assertIn('hx-get="/digest?hours=168&amp;mode=preset', response.text)
 
     def test_research_cache_survives_restart_and_falls_back_during_outage(self):

@@ -198,8 +198,11 @@ def classify_batch(announcements: list[dict]) -> dict[str, str]:
                 result[str(row["id"])] = cat
     except Exception as e:
         logger.warning("LLM classification fallback failed: %s", e)
+        # The maintenance worker retains pending inputs and retries later.
+        # A temporary provider failure is not a final routine classification.
+        raise
 
-    # Anything still unresolved (LLM call failed, or returned partial) -> unclassified
+    # A completed but partial response leaves unresolved items unclassified.
     for aid, _ in unresolved:
         result.setdefault(aid, "unclassified")
 

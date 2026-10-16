@@ -1,5 +1,9 @@
 <div role="status" class="text-xs text-slate-500 dark:text-slate-400">
   {% if feed.running %}<div>Refreshing data&hellip; Saved results remain available. This page updates automatically.</div>{% endif %}
+  {% if feed.classification_running %}<div>Preparing categories for new filings. Available results are shown below.</div>{% endif %}
+  {% if feed.backfill_running %}<div>Loading older filings in the background. Recent results are available below.</div>{% endif %}
   {% if feed.succeeded_at %}<div>Last successful refresh: {{ feed.succeeded_at|display_time }}</div>{% endif %}
   {% if feed.error %}<div class="text-amber-600 dark:text-amber-400">{{ feed.error }}</div>{% endif %}
+  {% if feed.classification_error and not feed.classification_running %}<div class="text-amber-600 dark:text-amber-400">{{ feed.classification_error }}</div>{% endif %}
+  {% if feed.backfill_error and not feed.backfill_running %}<div class="text-amber-600 dark:text-amber-400">{{ feed.backfill_error }}</div>{% endif %}
 </div>
