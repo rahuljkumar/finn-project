@@ -125,17 +125,40 @@ def get_snapshot(ticker: str) -> dict:
 
 def corpus_revision(ticker: str) -> str:
     path = _index_path(ticker)
-    stamp = f"{path.stat().st_mtime_ns}:{path.stat().st_size}" if path.exists() else "empty"
     with get_conn() as conn:
         row = conn.execute("SELECT revision FROM research_snapshots WHERE ticker=?", (ticker,)).fetchone()
-    return hashlib.sha256(f"{stamp}:{row[0] if row else ''}".encode()).hexdigest()[:20]
+        documents = [tuple(r) for r in conn.execute("""SELECT url,label,doc_type,content_hash
+            FROM research_documents WHERE ticker=? AND content_hash IS NOT NULL ORDER BY url""", (ticker,))]
+    if not path.exists():
+        evidence = "empty"
+    elif documents:
+        # Checked-at timestamps, download errors on retained reports, and
+        # touching an unchanged index do not change the available evidence.
+        evidence = documents
+    else:
+        # Earlier indexes acquire a content manifest at their next sync.
+        # Until then, detect changes without parsing a large vector file.
+        stamp = path.stat()
+        evidence = [stamp.st_mtime_ns, stamp.st_size]
+    signature = [EMBEDDING_MODEL, evidence, row[0] if row else ""]
+    return hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()[:20]
+
+
+def _has_index(ticker: str) -> bool:
+    """Check for saved chunks without loading their potentially huge vectors."""
+    try:
+        with _index_path(ticker).open("rb") as stream:
+            header = stream.read(128).lstrip()
+        return header.startswith(b"[") and header[1:].lstrip().startswith(b"{")
+    except OSError:
+        return False
 
 
 def document_status(ticker: str) -> dict:
     with get_conn() as conn:
         rows = conn.execute("SELECT label,status,checked_at FROM research_documents WHERE ticker=?", (ticker,)).fetchall()
         snapshot = conn.execute("SELECT saved_at FROM research_snapshots WHERE ticker=?", (ticker,)).fetchone()
-    return {"ready": bool(load_index(ticker)), "labels": sorted({r["label"] for r in rows if r["status"] == "indexed"}),
+    return {"ready": _has_index(ticker), "labels": sorted({r["label"] for r in rows if r["status"] == "indexed"}),
             "failed": sum(r["status"] == "error" for r in rows),
             "checked_at": snapshot[0] if snapshot else None}
 
@@ -155,12 +178,15 @@ _sync_locks = {}
 
 def sync_ticker(ticker: str, force: bool = False, *, all_reports: bool = False,
                 progress: Callable[[dict], None] | None = None,
-                since: date | None = None, as_of: date | None = None) -> dict:
+                since: date | None = None, as_of: date | None = None,
+                prepare_sections: bool = False) -> dict:
     """Sync recent reports, or the entire discovered archive for a backfill.
 
     Full backfills also ensure the PDFs behind reused vectors are on disk.
     Optional dates restrict downloads to the selected reporting window.
     A progress callback receives one terminal event per report.
+    The web service enables prepare_sections; standalone ingestion commands
+    leave AI section preparation to their explicit follow-up command.
     """
     ticker = ticker.strip().upper()
     if not re.fullmatch(r"[A-Z0-9&\-]{1,20}", ticker):
@@ -168,7 +194,14 @@ def sync_ticker(ticker: str, force: bool = False, *, all_reports: bool = False,
     with _sync_guard:
         lock = _sync_locks.setdefault(ticker, threading.Lock())
     with lock:
-        return _sync_ticker(ticker, force, all_reports=all_reports, progress=progress, since=since, as_of=as_of)
+        result = _sync_ticker(ticker, force, all_reports=all_reports, progress=progress, since=since, as_of=as_of)
+    if prepare_sections and ticker in {c["ticker"] for c in load_portfolio()["portfolio"]}:
+        try:
+            from app.pipeline.prepare_research import request_research_preparation
+            request_research_preparation(ticker)
+        except Exception:
+            logger.exception("Could not queue saved Research sections for %s", ticker)
+    return result
 
 
 def _sync_ticker(ticker: str, force: bool, *, all_reports: bool = False,
@@ -278,14 +311,14 @@ def _sync_ticker(ticker: str, force: bool, *, all_reports: bool = False,
     return summary
 
 
-def sync_portfolio(tickers: list[str] | None = None) -> dict:
+def sync_portfolio(tickers: list[str] | None = None, *, prepare_sections: bool = False) -> dict:
     if tickers is None:
         portfolio = load_portfolio()
         tickers = [c["ticker"] for c in portfolio["portfolio"] + portfolio["adhoc"]]
     results, failed = [], []
     for ticker in dict.fromkeys(tickers):
         try:
-            result = sync_ticker(ticker)
+            result = sync_ticker(ticker, prepare_sections=prepare_sections)
             results.append(result)
             if result["failed"]:
                 failed.append(ticker)
@@ -353,3 +386,22 @@ def generate_section(ticker: str, category: str, structured: dict | None = None)
     if structured:
         sources.append({"label": "Financial tables via Screener", "url": get_snapshot(ticker).get("source_url")})
     return {"content": content, "sources": sources}
+
+
+def generate_research_section(ticker: str, category: str):
+    """Use exactly the same evidence for precomputed and requested sections."""
+    if category == "promised_vs_delivered":
+        from app.pipeline.promised_vs_delivered import build_promised_vs_delivered
+        return build_promised_vs_delivered(ticker)
+    structured = None
+    if category in DEEP_CATEGORIES or category in {"balance_sheet", "cash_quality"}:
+        snapshot = get_snapshot(ticker)
+        if snapshot:
+            structured = {
+                "financial_snapshot": snapshot.get("profit_loss"),
+                "trajectory": snapshot.get("profit_loss"),
+                "balance_sheet": {"balance_sheet": snapshot.get("balance_sheet"),
+                                  "ratios": snapshot.get("ratios")},
+                "cash_quality": snapshot.get("cash_flow"),
+            }.get(category)
+    return generate_section(ticker, category, structured=structured)

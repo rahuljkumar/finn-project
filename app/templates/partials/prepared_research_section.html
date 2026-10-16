@@ -1,0 +1,26 @@
+<div id="prepared-{{ category }}"
+     {% if research_job and research_job.state == 'running' %}hx-get="/research/{{ ticker|urlencode }}/section/{{ category }}" hx-trigger="every 3s [this.offsetParent !== null]" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  {% if section %}
+    {% with data=section.data, saved_at=section.saved_at, stale=section.stale %}
+      {% if category == 'promised_vs_delivered' %}
+        {% with quarters=section.data %}{% include "partials/promised_vs_delivered.html" %}{% endwith %}
+      {% else %}
+        {% include "partials/pull_section.html" %}
+      {% endif %}
+    {% endwith %}
+  {% else %}
+    <div class="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-3 text-sm text-slate-500">
+      {% if research_job and research_job.state == 'running' %}
+      Preparing this company's research in the background. This section updates automatically when ready.
+      {% elif research_job and research_job.state == 'error' %}
+      Research could not be prepared right now. Saved reports are retained; preparation will retry.
+      {% elif research_job and research_job.state == 'disabled' %}
+      AI research preparation is unavailable until the server's API key is configured.
+      {% elif research_job and research_job.state == 'ready' %}
+      This section is not ready yet. Preparation will retry using the available reports.
+      {% else %}
+      Research will be prepared after this company's source reports are available. Use Check reports to prepare them.
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

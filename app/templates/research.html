@@ -5,11 +5,13 @@
     <button hx-post="/research/sync-documents" hx-target="#document-feed" hx-swap="outerHTML" hx-disabled-elt="this"
             class="text-blue-600 underline">Check portfolio reports</button></div>
   {% include "partials/document_feed.html" %}
+  {% include "partials/research_preparation.html" %}
 </div>
 <div class="flex flex-col gap-4">
   <div>
     <h1 class="text-xl font-semibold tracking-tight">Research</h1>
     <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Grounded only in each company's own annual report and concall transcripts &mdash; no news, no broker notes.</p>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">The portfolio's nine research sections are prepared in the background and saved. They update when source reports or financial evidence change.</p>
   </div>
 
   <form action="/research/lookup" method="get" class="flex gap-2">

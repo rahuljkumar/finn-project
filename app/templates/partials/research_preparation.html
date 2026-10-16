@@ -1,0 +1,6 @@
+<div id="research-preparation" class="text-xs text-slate-500 dark:text-slate-400 mt-2" role="status"
+     {% if preparation.pending %}hx-get="/feeds/research" hx-trigger="every 5s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <p>{{ preparation.ready }}/{{ preparation.total }} research sections ready across {{ preparation.companies }} portfolio companies.</p>
+  {% if preparation.state == 'preparing' %}<p>Preparing saved research in the background. Completed sections are available immediately.</p>
+  {% elif preparation.pending %}<p>Remaining sections are waiting for source reports or a preparation retry.</p>{% endif %}
+</div>

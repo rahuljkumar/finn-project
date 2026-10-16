@@ -207,7 +207,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(cached_research("AAA", "business_snapshot", fail), first)
         # Reopening the database does not discard research answers.
         init_db()
-        with patch("app.pipeline.research_cache.FRESH_FOR", timedelta(0)), \
+        with patch("app.pipeline.pull_pipeline.corpus_revision", return_value="new-evidence"), \
              self.assertLogs("app.pipeline.research_cache", level="WARNING"):
             saved = cached_research("AAA", "business_snapshot", fail)
         self.assertTrue(saved["stale"])

@@ -7,7 +7,8 @@ def isolate_background(test):
         return {"job_key": key, "kind": kind, "state": "disabled", "result": None,
                 "error": "Background work isolated by the test fixture."}
     for target in ("app.main.start_job", "app.pipeline.news.start_job",
-                   "app.pipeline.summaries.start_job", "app.pipeline.conversation.start_job"):
+                   "app.pipeline.summaries.start_job", "app.pipeline.conversation.start_job",
+                   "app.pipeline.prepare_research.start_job"):
         test_patch = patch(target, side_effect=disabled)
         test_patch.start()
         test.addCleanup(test_patch.stop)

@@ -1,6 +1,6 @@
 {% if saved_at %}
 <div class="text-xs text-slate-500 dark:text-slate-400 mb-2">
   Prepared: {{ saved_at|display_time }}
-  {% if stale %}<div class="text-amber-600">Showing the last saved answer. A fresh answer is temporarily unavailable; try again later.</div>{% endif %}
+  {% if stale %}<div class="text-amber-600">Showing the previous saved answer. {% if research_job and research_job.state == 'running' %}Updated research is being prepared in the background.{% else %}Updated research is not ready yet.{% endif %}</div>{% endif %}
 </div>
 {% endif %}

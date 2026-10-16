@@ -3,7 +3,7 @@
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from app.config import OPENAI_API_KEY
@@ -46,7 +46,8 @@ def _run(key, work):
 
 
 def start_job(key: str, kind: str, work, *, max_age: int | None = None,
-              retry: bool = False, requires_model: bool = True, background: bool = False) -> dict:
+              retry: bool = False, requires_model: bool = True, background: bool = False,
+              executor: Executor | None = None) -> dict:
     if requires_model and not OPENAI_API_KEY:
         return {"job_key": key, "kind": kind, "state": "disabled", "result": None,
                 "error": "Add your OpenAI API key to enable AI answers."}
@@ -67,6 +68,6 @@ def start_job(key: str, kind: str, work, *, max_age: int | None = None,
                 ON CONFLICT(job_key) DO UPDATE SET state='running', error=NULL, updated_at=excluded.updated_at""",
                          (key, kind, now.isoformat()))
         _running.add(key)
-        executor = _background_pool if background else _pool
+        executor = executor or (_background_pool if background else _pool)
         executor.submit(_run, key, work)
     return get_job(key)

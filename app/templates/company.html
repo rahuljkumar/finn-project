@@ -11,12 +11,14 @@
 
   <button
     @click="open = open === 'pvd' ? null : 'pvd'"
+    {% if not sections.get('promised_vs_delivered') %}
     hx-get="/research/{{ ticker }}/section/promised_vs_delivered"
     hx-target="#section-pvd"
     hx-swap="innerHTML"
     hx-trigger="click"
     hx-indicator="#panel-pvd"
     hx-disabled-elt="this"
+    {% endif %}
     class="text-left rounded-xl border-2 border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 p-3">
     <div class="flex items-center justify-between">
       <span class="font-medium text-sm">Promised vs. Delivered</span>
@@ -28,18 +30,20 @@
   </button>
   <div x-show="open === 'pvd'" x-cloak id="panel-pvd" class="research-section text-sm px-1">
     <div class="research-loading text-slate-500 dark:text-slate-400" role="status" aria-live="polite">Loading&hellip;</div>
-    <div id="section-pvd" class="research-result"></div>
+    <div id="section-pvd" class="research-result">{% if sections.get('promised_vs_delivered') %}{% with category='promised_vs_delivered', section=sections.get('promised_vs_delivered') %}{% include "partials/prepared_research_section.html" %}{% endwith %}{% endif %}</div>
   </div>
 
   {% for key, label in categories %}
   <button
     @click="open = open === '{{ key }}' ? null : '{{ key }}'"
+    {% if not sections.get(key) %}
     hx-get="/research/{{ ticker }}/section/{{ key }}"
     hx-target="#section-{{ key }}"
     hx-swap="innerHTML"
     hx-trigger="click"
     hx-indicator="#panel-{{ key }}"
     hx-disabled-elt="this"
+    {% endif %}
     class="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
     <div class="flex items-center justify-between">
       <span class="font-medium text-sm">{{ label }}</span>
@@ -50,7 +54,7 @@
   </button>
   <div x-show="open === '{{ key }}'" x-cloak id="panel-{{ key }}" class="research-section text-sm px-1 -mt-2">
     <div class="research-loading text-slate-500 dark:text-slate-400" role="status" aria-live="polite">Loading&hellip;</div>
-    <div id="section-{{ key }}" class="research-result"></div>
+    <div id="section-{{ key }}" class="research-result">{% if sections.get(key) %}{% with category=key, section=sections.get(key) %}{% include "partials/prepared_research_section.html" %}{% endwith %}{% endif %}</div>
   </div>
   {% endfor %}
 

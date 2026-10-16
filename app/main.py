@@ -17,12 +17,12 @@ from app.feeds import feed_status, poll_feeds, request_refresh
 from app.pipeline.alerts import get_all_alerts
 from app.pipeline.digest import get_digest
 from app.pipeline.enrich import get_management_bio, get_results_card
-from app.pipeline.promised_vs_delivered import build_promised_vs_delivered
-from app.pipeline.pull_pipeline import CATEGORY_PROMPTS, DEEP_CATEGORIES, document_status, generate_section, get_snapshot, sync_ticker
+from app.pipeline.pull_pipeline import CATEGORY_PROMPTS, document_status, sync_ticker
 from app.pipeline.conversation import request_answer
 from app.pipeline.news import request_explanation, search_enabled
 from app.pipeline.summaries import PRESETS, request_article_summary, summary_groups
-from app.pipeline.research_cache import ResearchBusy, cached_research
+from app.pipeline.research_cache import saved_research, saved_research_sections
+from app.pipeline.prepare_research import portfolio_preparation_status, request_research_preparation
 from app.presentation import display_time, render_markdown, source_url
 
 TICKER_RE = re.compile(r"^[A-Z0-9&\-]{1,20}$")
@@ -165,7 +165,7 @@ def enrich(request: Request, ann_id: str):
 
 
 @app.get("/research")
-async def research(request: Request):
+def research(request: Request):
     data = load_portfolio()
     return templates.TemplateResponse(
         request,
@@ -176,6 +176,7 @@ async def research(request: Request):
             "portfolio": data["portfolio"],
             "adhoc": data["adhoc"],
             "document_feed": feed_status("documents"),
+            "preparation": portfolio_preparation_status(),
         },
     )
 
@@ -186,7 +187,7 @@ async def research_lookup(ticker: str):
 
 
 @app.get("/research/{ticker}")
-async def company(request: Request, ticker: str):
+def company(request: Request, ticker: str):
     ticker = ticker.strip().upper()
     if not TICKER_RE.match(ticker):
         return templates.TemplateResponse(
@@ -197,14 +198,20 @@ async def company(request: Request, ticker: str):
                 "active": "research",
                 "portfolio": load_portfolio()["portfolio"],
                 "adhoc": load_portfolio()["adhoc"],
+                "document_feed": feed_status("documents"),
+                "preparation": portfolio_preparation_status(),
                 "error": f"'{ticker}' doesn't look like a valid NSE ticker.",
             },
         )
     names = {c["ticker"]: c["name"] for c in all_portfolio_companies()}
     documents = document_status(ticker)
+    sections = saved_research_sections(ticker)
+    research_job = None
+    if len(sections) < len(CATEGORY_PROMPTS) + 1 or any(section["stale"] for section in sections.values()):
+        research_job = request_research_preparation(ticker)
     document_job = get_job(f"documents:{ticker}")
     if not documents["ready"]:
-        document_job = start_job(f"documents:{ticker}", "documents", lambda: sync_ticker(ticker),
+        document_job = start_job(f"documents:{ticker}", "documents", lambda: sync_ticker(ticker, prepare_sections=True),
                                  max_age=86400, requires_model=False)
     return templates.TemplateResponse(
         request,
@@ -216,6 +223,7 @@ async def company(request: Request, ticker: str):
             "company_name": names.get(ticker),
             "categories": PULL_CATEGORY_LABELS,
             "documents": documents, "document_job": document_job,
+            "sections": sections, "research_job": research_job,
         },
     )
 
@@ -227,17 +235,7 @@ def company_pvd(request: Request, ticker: str):
         return templates.TemplateResponse(
             request, "partials/enrich_error.html", {"message": "Invalid ticker."}
         )
-    try:
-        result = cached_research(ticker, "promised_vs_delivered", lambda: build_promised_vs_delivered(ticker))
-    except ResearchBusy as exc:
-        return templates.TemplateResponse(request, "partials/enrich_error.html", {"message": str(exc)})
-    except Exception:
-        return templates.TemplateResponse(
-            request, "partials/enrich_error.html", {"message": "Couldn't generate this right now."}
-        )
-    return templates.TemplateResponse(
-        request, "partials/promised_vs_delivered.html", {"quarters": result["data"], **result}
-    )
+    return _prepared_section(request, ticker, "promised_vs_delivered")
 
 
 @app.get("/research/{ticker}/section/{category}")
@@ -251,33 +249,15 @@ def company_section(request: Request, ticker: str, category: str):
         return templates.TemplateResponse(
             request, "partials/enrich_error.html", {"message": "Invalid ticker."}
         )
-    def generate():
-        structured = None
-        if category in DEEP_CATEGORIES or category in ("balance_sheet", "cash_quality"):
-            fundamentals = get_snapshot(ticker)
-            if fundamentals:
-                structured = {
-                    "financial_snapshot": fundamentals["profit_loss"],
-                    "trajectory": fundamentals["profit_loss"],
-                    # working-capital cycle (debtor/inventory/payable days,
-                    # ROCE) lives in the ratios table, not balance_sheet --
-                    # the brief's "balance sheet" category explicitly wants both
-                    "balance_sheet": {
-                        "balance_sheet": fundamentals["balance_sheet"],
-                        "ratios": fundamentals["ratios"],
-                    },
-                    "cash_quality": fundamentals["cash_flow"],
-                }.get(category)
-        return generate_section(ticker, category, structured=structured)
-    try:
-        result = cached_research(ticker, category, generate)
-    except ResearchBusy as exc:
-        return templates.TemplateResponse(request, "partials/enrich_error.html", {"message": str(exc)})
-    except Exception:
-        return templates.TemplateResponse(
-            request, "partials/enrich_error.html", {"message": "Couldn't generate this right now."}
-        )
-    return templates.TemplateResponse(request, "partials/pull_section.html", result)
+    return _prepared_section(request, ticker, category)
+
+
+def _prepared_section(request: Request, ticker: str, category: str):
+    section = saved_research(ticker, category)
+    research_job = request_research_preparation(ticker) if not section or section["stale"] else None
+    return templates.TemplateResponse(request, "partials/prepared_research_section.html", {
+        "ticker": ticker, "category": category, "section": section, "research_job": research_job,
+    })
 
 
 def all_portfolio_companies() -> list[dict]:
@@ -340,7 +320,7 @@ def research_document_status(request: Request, ticker: str):
 @app.post("/research/{ticker}/documents")
 def research_document_sync(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
-    job = start_job(f"documents:{ticker}", "documents", lambda: sync_ticker(ticker),
+    job = start_job(f"documents:{ticker}", "documents", lambda: sync_ticker(ticker, prepare_sections=True),
                     max_age=0, retry=True, requires_model=False)
     return templates.TemplateResponse(request, "partials/research_documents.html",
         {"ticker": ticker, "documents": document_status(ticker), "document_job": job})
@@ -355,6 +335,13 @@ def research_portfolio_sync(request: Request):
 @app.get("/feeds/documents")
 def research_document_feed(request: Request):
     return templates.TemplateResponse(request, "partials/document_feed.html", {"document_feed": feed_status("documents")})
+
+
+@app.get("/feeds/research")
+def research_preparation_status(request: Request):
+    return templates.TemplateResponse(request, "partials/research_preparation.html", {
+        "preparation": portfolio_preparation_status(),
+    })
 
 
 @app.post("/digest/summaries")

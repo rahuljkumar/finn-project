@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import init_db
 from app.pipeline import pull_pipeline as pull
+from app.pipeline.research_cache import cached_research
 from app.presentation import render_markdown, source_url
 
 
@@ -103,8 +104,8 @@ class ResearchPresentationTests(unittest.TestCase):
             {"label": "Unavailable source", "url": None},
             {"label": "Unsafe source", "url": "javascript:alert(1)"},
         ]}
-        with patch("app.main.generate_section", return_value=data):
-            response = TestClient(app).get("/research/TEST/section/business_snapshot")
+        cached_research("TEST", "business_snapshot", lambda: data)
+        response = TestClient(app).get("/research/TEST/section/business_snapshot")
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.text, "html.parser")
         self.assertEqual(soup.strong.text, "At a glance")
@@ -117,8 +118,8 @@ class ResearchPresentationTests(unittest.TestCase):
         quarter = {"quarter": "Jun 2026", "verdict": "unclear", "rationale": "**Insufficient guidance**",
                    "actual": {m: {"qoq_pct": None} for m in ("revenue", "ebitda", "pbt", "pat")},
                    "guidance_source": "Apr 2026", "guidance_source_url": "https://example.com/call-apr.pdf"}
-        with patch("app.main.build_promised_vs_delivered", return_value=[quarter]):
-            response = TestClient(app).get("/research/TEST/section/promised_vs_delivered")
+        cached_research("TEST", "promised_vs_delivered", lambda: [quarter])
+        response = TestClient(app).get("/research/TEST/section/promised_vs_delivered")
         soup = BeautifulSoup(response.text, "html.parser")
         self.assertEqual(soup.strong.text, "Insufficient guidance")
         self.assertEqual(soup.a["href"], quarter["guidance_source_url"])

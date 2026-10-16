@@ -16,7 +16,7 @@ from app.config import DOCUMENT_SYNC_HOUR, DOCUMENT_SYNC_MINUTE
 logger = logging.getLogger(__name__)
 _guard = threading.Lock()
 _running = set()
-INTERVALS = {"filings": 300, "prices": 1800, "documents": 86400,
+INTERVALS = {"filings": 300, "prices": 1800, "documents": 86400, "research": 900,
              "filings_backfill": 86400, "filings_classify": 300}
 
 
@@ -55,7 +55,11 @@ def _job(feed: str):
             summary = {"classified": classify_pending_announcements()}
         elif feed == "documents":
             from app.pipeline.pull_pipeline import sync_portfolio
-            summary = sync_portfolio()
+            summary = sync_portfolio(prepare_sections=True)
+        elif feed == "research":
+            from app.pipeline.prepare_research import request_portfolio_preparation
+            jobs = request_portfolio_preparation()
+            summary = {"queued": sum(bool(job and job.get("state") == "running") for job in jobs)}
         else:
             summary = refresh_price_history()
         error = (("Some reports could not be indexed; saved reports are retained." if feed == "documents"
@@ -148,6 +152,14 @@ def document_schedule_slot(now: datetime) -> datetime:
 
 
 def poll_feeds(stop: threading.Event):
+    # A recent scheduling timestamp must not delay unfinished work after a
+    # restart. Per-company job keys coalesce this with views and report sync.
+    if not stop.is_set():
+        try:
+            from app.pipeline.prepare_research import request_portfolio_preparation
+            request_portfolio_preparation()
+        except Exception:
+            logger.exception("Could not resume saved Research preparation")
     while not stop.is_set():
         for feed in INTERVALS:
             # A full historical pass is requested after recent ingestion,
